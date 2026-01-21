@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+
+# Large / generated
+data/
+output/
+runs/
+models/
+
+# Weights & media
+*.pt
+*.onnx
+*.engine
+*.mp4
+*.avi
+*.mkv
+
+# Secrets
+.env
+.env.*

@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edu-Insight System (Tabbed Stats)</title>
+    <!-- D3.js v7 -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ====== Design System (Light Theme) ====== */
+        :root {
+            --bg-body: #f4f6f8;
+            --bg-panel: #ffffff;
+            --bg-header: #ffffff;
+            --border: #e0e0e0;
+
+            --text-main: #2c3e50;
+            --text-dim: #7f8c8d;
+            --text-light: #95a5a6;
+
+            --accent: #0984e3;
+            --accent-hover: #74b9ff;
+            --highlight: #e17055;
+            --selection: rgba(9, 132, 227, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0; padding: 0;
+            background: var(--bg-body); color: var(--text-main);
+            height: 100vh;
+            display: grid;
+            /* 原始布局 Grid */
+            grid-template-columns: 200px 1fr 380px;
+            grid-template-rows: 50px 1fr 220px;
+            grid-template-areas: "header header header" "sidebar main stats" "sidebar bottom bottom";
+            overflow: hidden; gap: 1px;
+        }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #bbb; }
+
+        /* Header */
+        .area-header {
+            grid-area: header; background: var(--bg-header);
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); z-index: 10;
+        }
+        .brand { font-weight: 700; font-size: 16px; color: var(--text-main); letter-spacing: -0.5px; display:flex; align-items:center; gap:10px;}
+        .brand i { color: var(--accent); font-size: 18px; }
+
+        /* Sidebar */
+        .area-sidebar {
+            grid-area: sidebar; background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; overflow-y: auto;
+        }
+        .list-header {
+            padding: 14px 16px; background: #fafafa;
+            font-size: 11px; font-weight: 600; color: var(--text-dim);
+            text-transform: uppercase; letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+        .list-item {
+            padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #f0f0f0;
+            font-size: 13px; color: var(--text-main); transition: all 0.2s;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .list-item:hover { background: #f8f9fa; color: var(--accent); }
+        .list-item.active { background: #eaf4fc; color: var(--accent); border-right: 3px solid var(--accent); font-weight: 600; }
+
+        /* Main Area */
+        .area-main { grid-area: main; background: #ffffff; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+
+        /* Tabs */
+        .tab-bar { background:#ffffff; border-bottom:1px solid var(--border); display:flex; height: 44px; flex-shrink: 0; padding: 0 10px;}
+        .tab-btn {
+            padding: 0 16px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-dim);
+            display: flex; align-items: center; gap: 6px; transition: all 0.2s; position: relative;
+            background: transparent; border: none; outline: none;
+        }
+        .tab-btn:hover { color: var(--accent); }
+        .tab-btn.active { color: var(--accent); font-weight: 600; }
+        .tab-btn.active::after {
+            content: ''; position: absolute; bottom: 0; left: 16px; right: 16px; height: 3px;
+            background: var(--accent); border-radius: 3px 3px 0 0;
+        }
+
+        .view-panel { flex:1; overflow:hidden; display:none; flex-direction:column; height: 100%; background: #fff; }
+        .view-panel.active { display: flex; }
+
+        /* Stats Panel (Right Side) */
+        .area-stats {
+            grid-area: stats; background: #fcfcfc;
+            display: flex; flex-direction: column; overflow: hidden;
+            border-left: 1px solid var(--border);
+        }
+
+        /* Stats Header with Tabs */
+        .stats-header-bar {
+            height: 44px; background: #fff; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; padding: 0 10px; justify-content: space-between;
+        }
+        .stats-tabs { display: flex; gap: 4px; height: 100%; align-items: center; }
+        .stats-tab-btn {
+            padding: 6px 10px; font-size: 11px; font-weight: 600; color: var(--text-dim);
+            background: transparent; border: none; cursor: pointer; border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .stats-tab-btn:hover { background: #f3f4f6; color: var(--text-main); }
+        .stats-tab-btn.active { background: #eaf4fc; color: var(--accent); }
+
+        /* Stats Content Views */
+        .stats-view-content { flex: 1; overflow-y: auto; display: none; padding: 0; flex-direction: column; }
+        .stats-view-content.active { display: flex; }
+
+        /* Insight Content */
+        .story-container { padding: 15px; }
+        .story-card {
+            background: #fff; border: 1px solid var(--border); border-radius: 8px;
+            padding: 20px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+        }
+        .story-title {
+            font-size: 15px; font-weight: 700; color: var(--text-main); margin-bottom: 10px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .story-text { font-size: 13px; line-height: 1.6; color: #555; text-align: justify; }
+        .tag-cloud { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+        .tag {
+            padding: 3px 8px; border-radius: 10px; font-size: 11px;
+            font-weight: 600; background: #eee; color: #555; border: 1px solid transparent;
+        }
+
+        /* Feature Content */
+        #pc-container { flex: 1; min-height: 200px; width: 100%; padding: 0; overflow: hidden; position: relative; }
+
+        /* Transcript */
+        .transcript-container { flex: 1; overflow-y: auto; padding: 20px; scroll-behavior: smooth; }
+        .transcript-line {
+            display: flex; margin-bottom: 12px; padding: 8px 12px; border-radius: 6px;
+            transition: all 0.2s; cursor: pointer; border-left: 3px solid transparent;
+        }
+        .transcript-line:hover { background: #f8f9fa; }
+        .transcript-line.active { background: #eaf4fc; border-left-color: var(--accent); }
+        .ts-meta { width: 50px; font-size: 11px; color: var(--text-dim); text-align: right; margin-right: 12px; flex-shrink: 0; padding-top: 3px; }
+        .ts-content { flex: 1; }
+        .ts-name { font-weight: 700; font-size: 12px; color: #2c3e50; margin-bottom: 3px; }
+        .ts-text { font-size: 13px; color: #34495e; line-height: 1.5; }
+
+        /* Projection Controls */
+        .controls-bar { padding: 10px 15px; background: #fff; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
+        .ctrl-select {
+            background: #fff; color: var(--text-main); border: 1px solid #dcdcdc;
+            padding: 5px 10px; font-size: 12px; border-radius: 4px; outline: none; cursor: pointer;
+        }
+        .ctrl-btn {
+            background: var(--accent); color: white; border: none;
+            padding: 6px 14px; cursor: pointer; border-radius: 4px;
+            font-size: 12px; font-weight: 600; box-shadow: 0 2px 4px rgba(9,132,227,0.2);
+        }
+        .ctrl-btn:hover { background: #0070d2; transform: translateY(-1px); }
+
+        /* Bottom Area */
+        .area-bottom { grid-area: bottom; background: #ffffff; display: flex; border-top: 1px solid var(--border); }
+
+        .video-wrapper {
+            flex: 0 0 320px;
+            background: #000; display: flex; flex-direction: column; position: relative;
+            border-right: 1px solid var(--border);
+        }
+        .video-controls {
+            height: 32px; background: #fff; border-bottom: 1px solid #eee;
+            display: flex; align-items: center; padding: 0 10px; gap: 6px;
+        }
+        .v-btn {
+            background: #f1f2f6; border: 1px solid transparent; color: #636e72;
+            font-size: 10px; padding: 2px 8px; cursor: pointer; border-radius: 16px; font-weight: 600;
+        }
+        .v-btn.active { background: var(--accent); color: #fff; }
+
+        .vid-container-inner { flex: 1; position: relative; background: #000; overflow: hidden; display: flex; justify-content: center; }
+        video { width: 100%; height: 100%; }
+        #overlayCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+
+        /* Viz Wrapper (Gantt) */
+        .viz-wrapper { flex: 1; display: flex; flex-direction: column; background: #fff; }
+        #gantt-container { flex: 1; position: relative; overflow: hidden; }
+
+        .cursor-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--highlight); pointer-events: none; z-index: 50; display: none; }
+
+        /* Tooltip */
+        #global-tooltip {
+            position: absolute; padding: 8px 12px; background: #fff;
+            color: #333; border: 1px solid #ddd; border-radius: 6px; font-size: 12px;
+            pointer-events: none; opacity: 0; z-index: 9999;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1); font-family: sans-serif;
+        }
+
+        /* Loading */
+        .loading-mask {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background:rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center;
+            z-index: 100; color: var(--accent); font-weight: bold; flex-direction: column; gap:10px;
+        }
+        .spinner {
+            width: 30px; height: 30px; border: 3px solid #f3f3f3; border-top: 3px solid var(--accent);
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Scatter Pie */
+        .glyph-group { cursor: pointer; transition: transform 0.2s; }
+        .glyph-group:hover { transform: scale(1.3); z-index: 100; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1)); }
+        .glyph-group.selected { stroke: #333; stroke-width: 2px; }
+        .glyph-group.dimmed { opacity: 0.1; }
+
+        /* PC Line */
+        .pc-line { fill: none; stroke-linejoin: round; transition: opacity 0.2s; }
+
+        /* Legend Styles (Updated: Only Gantt Legend) */
+        #gantt-legend-bar {
+            padding: 6px 15px; border-bottom: 1px solid #f0f0f0; background: #fff;
+            display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 11px; color: #666;
+        }
+        .h-legend-item { display: flex; align-items: center; gap: 4px; }
+        .h-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+
+    </style>
+</head>
+<body>
+
+    <header class="area-header">
+        <div class="brand">
+            <i class="fa-solid fa-layer-group"></i>
+            <div>EDU-INSIGHT <span>SYSTEM</span></div>
+        </div>
+        <div style="font-size:12px; color:var(--text-dim); display:flex; gap:15px; align-items:center;">
+             <div style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; background:#2ecc71; border-radius:50%;"></div> Server Connected</div>
+        </div>
+    </header>
+
+    <aside class="area-sidebar">
+        <div class="list-header">Classroom Cases</div>
+        <div id="video-list-container">
+            <div class="empty-tip" style="padding:20px; text-align:center; color:#999;">Loading...</div>
+        </div>
+    </aside>
+
+    <main class="area-main">
+        <div class="tab-bar" id="tab-bar-container">
+            <button data-tab="projection" class="tab-btn active"><i class="fa-solid fa-chart-pie"></i> Student Clusters</button>
+            <button data-tab="transcript" class="tab-btn"><i class="fa-solid fa-align-left"></i> Semantic Stream</button>
+            <button data-tab="group" class="tab-btn"><i class="fa-solid fa-users"></i> Group Dynamics</button>
+        </div>
+
+        <!-- View: Projection (Default) -->
+        <div id="view-projection" class="view-panel active">
+            <div class="controls-bar">
+                <span>Metrics:</span>
+                <select id="proj-metric" class="ctrl-select">
+                    <option value="euclidean">Behavior Composition (Euclidean)</option>
+                    <option value="levenshtein">Sequence Similarity (Levenshtein)</option>
+                </select>
+                <select id="proj-method" class="ctrl-select">
+                    <option value="tsne">t-SNE</option>
+                    <option value="pca">PCA</option>
+                    <option value="mds">MDS</option>
+                </select>
+                <div style="flex:1"></div>
+                <button id="btn-proj-apply" class="ctrl-btn">Update View</button>
+            </div>
+            <div id="projection-chart" style="flex:1; position:relative; background:#fafafa;">
+                <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:#999; text-align:center;">
+                    <i class="fa-solid fa-chart-scatter" style="font-size:32px; margin-bottom:10px; opacity:0.3;"></i><br>
+                    Select options and Apply to generate clusters
+                </div>
+            </div>
+            <!-- REMOVED: Main View Legend -->
+        </div>
+
+        <!-- View: Transcript -->
+        <div id="view-transcript" class="view-panel">
+            <div class="transcript-container" id="transcript-box"></div>
+        </div>
+
+        <!-- View: Group -->
+        <div id="view-group" class="view-panel">
+            <div id="group-timeline-box" style="padding:20px;">
+                <div style="color:#999; text-align:center; margin-top:40px;">No group events detected yet.</div>
+            </div>
+        </div>
+
+        <div id="main-loading" class="loading-mask" style="display:none;">
+            <div class="spinner"></div>
+            <div>ANALYZING DATA...</div>
+        </div>
+    </main>
+
+    <!-- RIGHT PANEL: Tabbed Stats -->
+    <aside class="area-stats">
+        <div class="stats-header-bar">
+            <div class="stats-tabs">
+                <button class="stats-tab-btn active" data-target="insight"><i class="fa-regular fa-lightbulb"></i> Insight & Pattern</button>
+                <button class="stats-tab-btn" data-target="feature"><i class="fa-solid fa-chart-simple"></i> Feature Dist.</button>
+            </div>
+            <button id="btn-reset-filters" style="border:none; background:none; color:var(--accent); cursor:pointer; font-size:11px;">RESET</button>
+        </div>
+
+        <!-- View 1: Insight -->
+        <div id="stats-view-insight" class="stats-view-content active">
+            <div class="story-container" id="stat-list-content">
+                <div class="story-card" style="text-align:center; padding:40px 20px;">
+                    <i class="fa-regular fa-lightbulb" style="font-size:32px; color:#ddd; margin-bottom:15px;"></i>
+                    <div style="color:#777; font-size:14px;">Select a student (pie chart) on the map to reveal their behavior pattern.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- View 2: Features (Full Height PC) -->
+        <div id="stats-view-feature" class="stats-view-content">
+            <div style="padding:15px; font-size:11px; color:#999; border-bottom:1px solid #eee;">
+                MULTIDIMENSIONAL FEATURE ANALYSIS
+            </div>
+            <div id="pc-container"></div>
+        </div>
+    </aside>
+
+    <section class="area-bottom">
+        <div class="video-wrapper">
+            <div class="video-controls" id="video-controls-container">
+                <span style="font-size:11px; font-weight:bold; color:#aaa; margin-right:10px;">MODE</span>
+                <button class="v-btn active" data-mode="original">Original</button>
+                <button class="v-btn" data-mode="overlay">AI Overlay</button>
+                <button class="v-btn" data-mode="pose">Skeleton</button>
+                <div style="flex:1"></div>
+                <button id="btn-bbox" class="v-btn"><i class="fa-solid fa-vector-square"></i> BBox</button>
+            </div>
+            <div class="vid-container-inner">
+                <video id="myVideo" controls playsinline></video>
+                <canvas id="overlayCanvas"></canvas>
+            </div>
+        </div>
+        <div class="viz-wrapper">
+            <div style="padding:5px 10px; border-bottom:1px solid #eee; font-size:11px; font-weight:bold; color:#aaa; display:flex; justify-content:space-between; flex-shrink:0;">
+                <span>TEMPORAL ACTIVITY</span>
+                <span id="time-display">00:00</span>
+            </div>
+            <!-- 甘特图横向图例条 -->
+            <div id="gantt-legend-bar"></div>
+            <div id="gantt-container">
+                <div id="cursor-gantt" class="cursor-line"></div>
+            </div>
+        </div>
+    </section>
+
+    <div id="global-tooltip"></div>
+
+<script>
+    // ====== CONFIG ======
+    const CONFIG = {
+        API_BASE: (window.location.protocol === 'file:' || window.location.href.includes('scf.usercontent.goog'))
+                  ? 'http://localhost:8000/api'
+                  : '/api',
+        ACTION_NAMES: {
+            0: "Listen", 1: "Distract", 2: "Phone", 3: "Doze", 4: "Chat",
+            5: "Note", 6: "Raise", 7: "Stand", 8: "Read"
+        },
+        COLORS: {
+            0:"#2ecc71", 1:"#95a5a6", 2:"#e74c3c", 3:"#3498db", 4:"#f39c12",
+            5:"#9b59b6", 6:"#f1c40f", 7:"#1abc9c", 8:"#d35400",
+            "unknown": "#bdc3c7"
+        },
+        GROUP_COLORS: {
+            "lecture": "#d1f2eb",
+            "discussion": "#d6eaf8",
+            "break": "#fadbd8",
+            "individual_work": "#f6ddcc"
+        }
+    };
+
+    // ====== STORE ======
+    const Store = {
+        state: {
+            caseList: [],
+            currentCaseId: null,
+            timelineData: [], // Persons
+            groupData: [],
+            transcriptData: [],
+            tracksData: {},
+            projectionData: null,
+            isLoading: false,
+            videoDuration: 0,
+            currentTime: 0,
+            viewMode: "original",
+            isBBoxEnabled: false,
+            videoUrls: {},
+            filteredIds: null,
+            selectedTrackId: null
+        },
+        listeners: {},
+        subscribe(evt, fn) { (this.listeners[evt]||(this.listeners[evt]=[])).push(fn); },
+        notify(evt, payload) { (this.listeners[evt]||[]).forEach(fn => fn(this.state, payload)); },
+
+        async loadCaseList() {
+            try {
+                const res = await fetch(`${CONFIG.API_BASE}/list_cases`).then(r=>r.json());
+                this.state.caseList = Array.isArray(res) ? res : [];
+            } catch(e) { console.error(e); this.state.caseList = []; }
+            this.notify("caseListLoaded");
+        },
+
+        async selectCase(caseId) {
+            if(this.state.currentCaseId === caseId) return;
+            this.state.currentCaseId = caseId;
+            this.state.isLoading = true;
+            this.state.selectedTrackId = null; // Reset selection
+            this.notify("loadingStart");
+
+            this.state.videoUrls = await resolveVideoUrls(caseId);
+
+            try {
+                const [tl, tr, trk, st] = await Promise.all([
+                    fetch(`${CONFIG.API_BASE}/timeline/${caseId}`).then(r=>r.json()).catch(()=>({})),
+                    fetch(`${CONFIG.API_BASE}/transcript/${caseId}`).then(r=>r.json()).catch(()=>([])),
+                    fetch(`${CONFIG.API_BASE}/tracks/${caseId}`).then(r=>r.json()).catch(()=>({})),
+                    fetch(`${CONFIG.API_BASE}/stats/${caseId}`).then(r=>r.json()).catch(()=>({}))
+                ]);
+
+                // Normalize Timeline
+                const persons = [], groups = [];
+                (tl.items||[]).forEach(d => {
+                    if(d.type === 'group') groups.push(d);
+                    else {
+                        d.start = parseFloat(d.start); d.end = parseFloat(d.end); d.track_id = parseInt(d.track_id);
+                        persons.push(d);
+                    }
+                });
+
+                // Re-assign rows
+                const tids = [...new Set(persons.map(d=>d.track_id))].sort((a,b)=>a-b);
+                const rowMap = new Map(tids.map((id,i)=>[id,i]));
+                persons.forEach(d => d.row = rowMap.get(d.track_id));
+
+                this.state.timelineData = persons;
+                this.state.groupData = groups;
+                this.state.transcriptData = tr;
+                this.state.tracksData = trk || {};
+
+                // Clear old projection
+                this.state.projectionData = null;
+
+            } catch(e) { console.error(e); }
+
+            this.state.isLoading = false;
+            this.notify("dataLoaded");
+            this.notify("loadingEnd");
+
+            // Auto fetch default projection
+            document.getElementById('btn-proj-apply').click();
+        },
+
+        setSelection(id) {
+            this.state.selectedTrackId = (this.state.selectedTrackId === id) ? null : id;
+            this.notify("selectionChanged");
+        },
+
+        async fetchProjection(method, metric) {
+            const caseId = this.state.currentCaseId;
+            if(!caseId) return;
+            document.getElementById("projection-chart").innerHTML = '<div style="text-align:center;padding:50px;color:#aaa;">Running Dimensionality Reduction...</div>';
+            try {
+                const res = await fetch(`${CONFIG.API_BASE}/projection/${caseId}?method=${method}&metric=${metric}`).then(r=>r.json());
+                this.state.projectionData = res;
+                this.notify("projectionLoaded");
+            } catch(e) {
+                document.getElementById("projection-chart").innerHTML = '<div style="text-align:center;padding:50px;color:red;">Analysis Failed</div>';
+            }
+        }
+    };
+
+    // ====== UTILS ======
+    async function resolveVideoUrls(caseId) {
+        let base = CONFIG.API_BASE.startsWith("http") ? CONFIG.API_BASE.replace(/\/api\/?$/, "") : "";
+        const urls = {
+            original: [`/videos/${caseId}.mp4`],
+            overlay: [`/outputs/${caseId}/${caseId}_overlay.mp4`, `/outputs/${caseId}_overlay.mp4`],
+            pose: [`/outputs/${caseId}/pose_demo_out.mp4`]
+        };
+        const res = {};
+        for(let k in urls) {
+            for(let u of urls[k]) {
+                try {
+                    let r = await fetch(base + u, {method:'HEAD'});
+                    if(r.ok && (r.headers.get("content-type")||"").includes("video")) { res[k] = base+u; break; }
+                } catch(e){}
+            }
+        }
+        return res;
+    }
+
+    function formatTime(s) {
+        const m = Math.floor(s/60), sec = Math.floor(s%60);
+        return `${m}:${sec.toString().padStart(2,'0')}`;
+    }
+
+    // ====== RENDER LEGENDS ======
+    function renderLegends() {
+        // 1. Projection Legend (REMOVED)
+
+        // 2. Gantt Legend (Horizontal Bar)
+        const ganttL = document.getElementById("gantt-legend-bar");
+        if(ganttL) {
+            let html = ``;
+            Object.entries(CONFIG.ACTION_NAMES).forEach(([k, name]) => {
+                const color = CONFIG.COLORS[k];
+                html += `<div class="h-legend-item"><div class="h-legend-dot" style="background:${color}"></div>${name}</div>`;
+            });
+            ganttL.innerHTML = html;
+        }
+    }
+
+    // ====== INIT ======
+    document.addEventListener("DOMContentLoaded", () => {
+        Store.loadCaseList();
+        renderLegends(); // Render static legends
+
+        // 1. Main Tab Switching
+        document.getElementById("tab-bar-container").addEventListener("click", e => {
+            const btn = e.target.closest(".tab-btn");
+            if(!btn) return;
+            document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+            document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+            btn.classList.add("active");
+            document.getElementById(`view-${btn.dataset.tab}`).classList.add("active");
+
+            if(btn.dataset.tab === 'projection' && !Store.state.projectionData && Store.state.currentCaseId) {
+                document.getElementById('btn-proj-apply').click();
+            }
+        });
+
+        // 2. Stats Tab Switching (Right Panel)
+        document.querySelectorAll(".stats-tab-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                document.querySelectorAll(".stats-tab-btn").forEach(b => b.classList.remove("active"));
+                document.querySelectorAll(".stats-view-content").forEach(c => c.classList.remove("active"));
+
+                btn.classList.add("active");
+                const target = btn.dataset.target;
+                document.getElementById(`stats-view-${target}`).classList.add("active");
+
+                // If switching to features, refresh chart size
+                if(target === 'feature') {
+                    renderPC(Store.state);
+                }
+            });
+        });
+
+        // Sidebar click
+        document.getElementById("video-list-container").addEventListener("click", e => {
+            const item = e.target.closest(".list-item");
+            if(item) Store.selectCase(item.dataset.id);
+        });
+
+        // Projection
+        document.getElementById("btn-proj-apply").addEventListener("click", () => {
+            Store.fetchProjection(
+                document.getElementById("proj-method").value,
+                document.getElementById("proj-metric").value
+            );
+        });
+
+        // Video setup
+        const v = document.getElementById("myVideo");
+        v.addEventListener("loadedmetadata", () => Store.state.videoDuration = v.duration);
+        v.addEventListener("timeupdate", () => {
+            Store.state.currentTime = v.currentTime;
+            Store.notify("timeUpdated");
+            document.getElementById("time-display").innerText = formatTime(v.currentTime);
+        });
+
+        // View Mode
+        document.getElementById("video-controls-container").addEventListener("click", e => {
+            const btn = e.target.closest(".v-btn");
+            if(!btn) return;
+            if(btn.id === 'btn-bbox') {
+                Store.state.isBBoxEnabled = !Store.state.isBBoxEnabled;
+                btn.classList.toggle("active", Store.state.isBBoxEnabled);
+            } else if(btn.dataset.mode) {
+                const url = Store.state.videoUrls[btn.dataset.mode];
+                if(!url) { alert("Video not found"); return; }
+                const t = v.currentTime, p = !v.paused;
+                v.src = url; v.load();
+                v.onloadeddata = () => { v.currentTime = t; if(p) v.play(); };
+                document.querySelectorAll(".v-btn[data-mode]").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+            }
+        });
+
+        // Reset Filter
+        document.getElementById("btn-reset-filters").addEventListener("click", () => {
+            Store.state.filteredIds = null;
+            Store.state.selectedTrackId = null;
+            Store.notify("selectionChanged");
+            Store.notify("filterChanged");
+            d3.select("#pc-container .brush").call(d3.brushX().move, null);
+        });
+
+        requestAnimationFrame(renderLoop);
+    });
+
+    // ====== RENDERERS ======
+
+    // 1. Sidebar List
+    Store.subscribe("caseListLoaded", (state) => {
+        const c = document.getElementById("video-list-container");
+        c.innerHTML = "";
+        if(state.caseList.length===0) c.innerHTML = `<div class="empty-tip">No videos found</div>`;
+        state.caseList.forEach(id => {
+            c.innerHTML += `<div class="list-item" data-id="${id}"><i class="fa-regular fa-file-video"></i> ${id}</div>`;
+        });
+        if(state.caseList.length) Store.selectCase(state.caseList[0]);
+    });
+
+    Store.subscribe("loadingStart", () => {
+        document.getElementById("main-loading").style.display = "flex";
+        document.getElementById("projection-chart").innerHTML = '';
+        document.getElementById("stat-list-content").innerHTML = '';
+        document.getElementById("transcript-box").innerHTML = '';
+    });
+
+    Store.subscribe("loadingEnd", () => document.getElementById("main-loading").style.display = "none");
+
+    Store.subscribe("dataLoaded", (state) => {
+        // UI updates
+        document.querySelectorAll(".list-item").forEach(el =>
+            el.classList.toggle("active", el.dataset.id === state.currentCaseId)
+        );
+        if(state.videoUrls.original) {
+            const v = document.getElementById("myVideo");
+            v.src = state.videoUrls.original;
+            v.load();
+        }
+
+        renderGantt(state);
+        renderTranscript(state);
+        renderGroup(state);
+        renderPC(state); // Build parallel coords
+
+        // Initial story
+        document.getElementById("stat-list-content").innerHTML = `
+            <div class="story-card" style="text-align:center; padding:40px 20px;">
+                <i class="fa-solid fa-chart-pie" style="font-size:32px; color:#ddd; margin-bottom:15px;"></i>
+                <div class="story-title" style="justify-content:center;">Ready to Analyze</div>
+                <div class="story-text">Switch to "Student Clusters" and click Update to visualize behavior patterns.</div>
+            </div>
+        `;
+    });
+
+    // 2. Projection (Scatter Pie)
+    Store.subscribe("projectionLoaded", (state) => {
+        const container = document.getElementById("projection-chart");
+        container.innerHTML = "";
+        const points = state.projectionData?.points || [];
+        if(!points.length) { container.innerHTML = "<div style='padding:40px;text-align:center;'>No Data</div>"; return; }
+
+        const w = container.clientWidth, h = container.clientHeight;
+        const svg = d3.select(container).append("svg").attr("width", w).attr("height", h);
+
+        const xS = d3.scaleLinear().domain(d3.extent(points, d=>d.x)).range([40, w-40]);
+        const yS = d3.scaleLinear().domain(d3.extent(points, d=>d.y)).range([h-40, 40]);
+
+        // Precompute action distribution for each student
+        const studentPies = {};
+        state.timelineData.forEach(d => {
+            if(!studentPies[d.track_id]) studentPies[d.track_id] = {};
+            const dur = d.end - d.start;
+            studentPies[d.track_id][d.action_id] = (studentPies[d.track_id][d.action_id] || 0) + dur;
+        });
+
+        // Pie generator
+        const pie = d3.pie().value(d => d.value).sort(null);
+        const arc = d3.arc().innerRadius(0).outerRadius(8); // Radius 8 for scatter dots
+
+        // Render Groups
+        const gs = svg.selectAll(".glyph-group")
+            .data(points)
+            .enter().append("g")
+            .attr("class", "glyph-group")
+            .attr("transform", function(d) { return "translate(" + xS(d.x) + "," + yS(d.y) + ")"; })
+            .on("click", (e, d) => Store.setSelection(d.track_id))
+            .on("mouseover", function() { d3.select(this).style("z-index", 100); });
+
+        // Draw Pie Slices inside each group
+        gs.each(function(d) {
+            const counts = studentPies[d.track_id] || {0:1}; // Default listen if empty
+            const data = Object.entries(counts).map(([k,v]) => ({key:k, value:v}));
+
+            d3.select(this).selectAll("path")
+                .data(pie(data))
+                .enter().append("path")
+                .attr("d", arc)
+                .attr("fill", slice => CONFIG.COLORS[slice.data.key] || "#999")
+                .attr("stroke", "#fff")
+                .attr("stroke-width", 0.5);
+        });
+
+        // Add ID Label
+        gs.append("text").text(d => d.track_id).attr("y", 20).attr("text-anchor", "middle").attr("font-size", "10px").attr("fill", "#666");
+    });
+
+    Store.subscribe("selectionChanged", (state) => {
+        // Highlight in projection
+        d3.selectAll(".glyph-group")
+            .classed("selected", d => d.track_id === state.selectedTrackId)
+            .style("opacity", d => (state.selectedTrackId && d.track_id !== state.selectedTrackId) ? 0.2 : 1);
+
+        // Highlight Gantt
+        d3.selectAll(".gantt-bar")
+            .style("opacity", d => (state.selectedTrackId && d.track_id !== state.selectedTrackId) ? 0.1 : 1);
+
+        // Highlight PC lines
+        d3.selectAll(".pc-line")
+            .style("stroke", d => d.id === state.selectedTrackId ? "var(--highlight)" : (state.selectedTrackId ? "#eee" : "var(--accent)"))
+            .style("opacity", d => d.id === state.selectedTrackId ? 1 : (state.selectedTrackId ? 0.1 : 0.3))
+            .style("stroke-width", d => d.id === state.selectedTrackId ? 2 : 1)
+            .raise();
+
+        renderStory(state);
+    });
+
+    // 3. Story / Insights Generator
+    function renderStory(state) {
+        const container = document.getElementById("stat-list-content");
+        const tid = state.selectedTrackId;
+
+        if(!tid) {
+            container.innerHTML = `<div class="story-card" style="text-align:center; padding:40px 20px;"><div style="color:#aaa;">Click a pie chart to see the student's story.</div></div>`;
+            return;
+        }
+
+        // Generate data for story
+        const actions = state.timelineData.filter(d => d.track_id === tid);
+        if(!actions.length) return;
+
+        const totalDur = actions.reduce((s,d) => s+(d.end-d.start), 0);
+        const counts = {};
+        actions.forEach(d => counts[d.action_id] = (counts[d.action_id]||0) + (d.end-d.start));
+
+        // Find top behavior
+        const sortedActs = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+        const topAct = CONFIG.ACTION_NAMES[sortedActs[0][0]];
+        const topPct = Math.round((sortedActs[0][1]/totalDur)*100);
+
+        // Find distraction
+        const distractDur = (counts[1]||0) + (counts[2]||0) + (counts[3]||0); // Distract, Phone, Doze
+        const distractPct = Math.round((distractDur/totalDur)*100);
+
+        // Find interaction
+        const interactDur = (counts[4]||0) + (counts[6]||0) + (counts[7]||0); // Chat, Raise, Stand
+
+        // Construct Story HTML
+        let mood = "Neutral";
+        let color = "#95a5a6";
+        if(topAct === "Listen" || topAct === "Note") { mood = "Focused"; color="#2ecc71"; }
+        else if(distractPct > 30) { mood = "Distracted"; color="#e74c3c"; }
+        else if(interactDur > totalDur*0.2) { mood = "Interactive"; color="#f1c40f"; }
+
+        const html = `
+            <div class="story-card" style="border-left: 4px solid ${color};">
+                <div class="story-title">
+                    <span>Student #${tid}</span>
+                    <span style="font-size:12px; background:${color}; color:#fff; padding:2px 8px; border-radius:4px;">${mood}</span>
+                </div>
+                <div class="story-text">
+                    This student spent <b>${topPct}%</b> of the class time <b>${topAct}ing</b>.
+                    ${distractPct > 10 ? `However, there were significant periods of distraction (${distractPct}%).` : `They maintained high focus throughout the session.`}
+                    ${interactDur > 10 ? `Notably, they actively participated in interactions (Raise hand/Chat).` : ``}
+                </div>
+                <div class="tag-cloud">
+                    ${sortedActs.slice(0,3).map(x => `<span class="tag" style="border:1px solid ${CONFIG.COLORS[x[0]]}">${CONFIG.ACTION_NAMES[x[0]]} ${(x[1]/totalDur*100).toFixed(0)}%</span>`).join('')}
+                </div>
+            </div>
+
+            <div class="story-card">
+                <div class="story-title" style="font-size:13px;">Timeline Snapshot</div>
+                <div style="height:40px; background:#f9f9f9; position:relative; overflow:hidden; border-radius:4px;">
+                    ${actions.map(d => `<div style="position:absolute; left:${(d.start/state.videoDuration)*100}%; width:${Math.max(0.5, ((d.end-d.start)/state.videoDuration)*100)}%; top:0; bottom:0; background:${CONFIG.COLORS[d.action_id]}"></div>`).join('')}
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    }
+
+    // 4. Gantt
+    function renderGantt(state) {
+        const container = document.getElementById("gantt-container");
+        container.innerHTML = '<div id="cursor-gantt" class="cursor-line"></div>';
+        const data = state.timelineData;
+        if(!data.length) return;
+
+        const w = container.clientWidth;
+        const maxRow = d3.max(data, d => d.row);
+        const rowH = Math.min(20, Math.max(10, container.clientHeight / (maxRow+1))); // Auto scale height
+
+        const svg = d3.select(container).append("svg").attr("width", w).attr("height", (maxRow+1)*rowH);
+        const x = d3.scaleLinear().domain([0, d3.max(data, d=>d.end)]).range([0, w]);
+
+        // Store scale for cursor
+        window.ganttScaleX = x;
+
+        svg.selectAll("rect")
+            .data(data).enter().append("rect")
+            .attr("class", "gantt-bar")
+            .attr("x", d => x(d.start))
+            .attr("y", d => d.row * rowH + 1)
+            .attr("width", d => Math.max(1, x(d.end) - x(d.start)))
+            .attr("height", rowH - 2)
+            .attr("fill", d => CONFIG.COLORS[d.action_id])
+            .attr("rx", 2)
+            .on("click", (e,d) => { Store.setSelection(d.track_id); document.getElementById("myVideo").currentTime = d.start; });
+
+        svg.selectAll("text")
+            .data([...new Set(data.map(d=>d.row))]).enter().append("text")
+            .attr("x", 5).attr("y", r => r*rowH + rowH/2 + 3)
+            .text(r => `S${r}`)
+            .attr("fill", "#fff").attr("font-size", "9px").style("text-shadow", "0 0 2px #000");
+    }
+
+    // 5. Parallel Coordinates (Fixed Layout: Removed Padding, Added D3 Margin)
+    function renderPC(state) {
+        const container = document.getElementById("pc-container");
+        // Ensure container is visible before calculating dims
+        if (!container || container.clientWidth === 0) return;
+
+        container.innerHTML = "";
+
+        // Calculate features locally
+        const students = {};
+        state.timelineData.forEach(d => {
+            if(!students[d.track_id]) students[d.track_id] = {id:d.track_id, total:0, focus:0, interact:0};
+            const dur = d.end - d.start;
+            students[d.track_id].total += dur;
+            if([0,5,6,8].includes(d.action_id)) students[d.track_id].focus += dur;
+            if([4,6,7].includes(d.action_id)) students[d.track_id].interact += dur;
+        });
+
+        // Safe division helper
+        const safeDiv = (a, b) => b > 0 ? a / b : 0;
+
+        const data = Object.values(students).map(s => ({
+            id: s.id,
+            "Focus": safeDiv(s.focus, s.total),
+            "Interact": safeDiv(s.interact, s.total),
+            "Active": 1 - safeDiv(s.focus, s.total) // Dummy metric
+        }));
+
+        if(!data.length) {
+            container.innerHTML = "<div style='text-align:center;padding-top:40px;color:#ccc;font-size:12px;'>No Feature Data Available</div>";
+            return;
+        }
+
+        // Layout calculation with margins
+        const rect = container.getBoundingClientRect();
+        const w = rect.width;
+        const h = rect.height || 200;
+
+        const margin = { top: 30, right: 15, bottom: 20, left: 40 };
+        const innerW = w - margin.left - margin.right;
+        const innerH = h - margin.top - margin.bottom;
+
+        const svg = d3.select(container).append("svg")
+            .attr("width", w)
+            .attr("height", h)
+            .style("display", "block")
+            .append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        const dims = ["Focus", "Interact", "Active"];
+        const y = {};
+        dims.forEach(d => y[d] = d3.scaleLinear().domain([0,1]).range([innerH, 0]));
+        const x = d3.scalePoint().range([0, innerW]).padding(0.1).domain(dims);
+
+        // Lines
+        svg.selectAll("path")
+            .data(data).enter().append("path")
+            .attr("class", "pc-line")
+            .attr("d", d => d3.line()(dims.map(p => [x(p), y[p](d[p])])))
+            .style("fill", "none")
+            .style("stroke", d => d.id === state.selectedTrackId ? "var(--highlight)" : "var(--accent)")
+            .style("opacity", d => {
+                if (state.selectedTrackId && state.selectedTrackId !== d.id) return 0.1;
+                return d.id === state.selectedTrackId ? 1 : 0.3;
+            })
+            .style("stroke-width", d => d.id === state.selectedTrackId ? 2 : 1);
+
+        // Axes
+        dims.forEach(d => {
+            const axisG = svg.append("g").attr("transform", "translate(" + x(d) + ",0)");
+            axisG.call(d3.axisLeft(y[d]).ticks(5).tickSize(-4));
+
+            axisG.append("text")
+                .attr("y", -12)
+                .text(d)
+                .attr("fill", "#6b7280")
+                .attr("font-size", "10px")
+                .attr("font-weight", "bold")
+                .attr("text-anchor", "middle")
+                .style("text-shadow", "0 1px 2px #fff");
+
+            axisG.selectAll("text").style("font-family", "monospace").style("font-size", "9px");
+            axisG.selectAll(".domain").attr("stroke", "#e5e7eb");
+            axisG.selectAll(".tick line").attr("stroke", "#e5e7eb");
+        });
+    }
+
+    // 6. Group View
+    function renderGroup(state) {
+        const c = document.getElementById("group-timeline-box");
+        c.innerHTML = "";
+        if(!state.groupData.length) { c.innerHTML = `<div style="text-align:center; color:#ccc; margin-top:20px;">No group events</div>`; return; }
+
+        state.groupData.forEach(g => {
+            const col = CONFIG.GROUP_COLORS[g.group_event] || "#eee";
+            c.innerHTML += `
+                <div style="background:${col}; padding:10px; margin-bottom:8px; border-radius:6px; font-size:13px; display:flex; justify-content:space-between; cursor:pointer;" onclick="document.getElementById('myVideo').currentTime=${g.start}">
+                    <strong>${(g.group_event||'Event').toUpperCase()}</strong>
+                    <span>${formatTime(g.start)} - ${formatTime(g.end)}</span>
+                </div>
+            `;
+        });
+    }
+
+    // 7. Transcript
+    function renderTranscript(state) {
+        const c = document.getElementById("transcript-box");
+        c.innerHTML = "";
+        state.transcriptData.forEach((t, i) => {
+            c.innerHTML += `
+                <div class="transcript-line" data-start="${t.start}" onclick="document.getElementById('myVideo').currentTime=${t.start}">
+                    <div class="ts-meta">${formatTime(t.start)}</div>
+                    <div class="ts-content">
+                        <div class="ts-name">Speaker</div>
+                        <div class="ts-text">${t.text}</div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    Store.subscribe("timeUpdated", (state) => {
+        const t = state.currentTime;
+        // Gantt Cursor
+        if(window.ganttScaleX) {
+            const x = window.ganttScaleX(t);
+            const cur = document.getElementById("cursor-gantt");
+            cur.style.display = "block"; cur.style.left = x + "px";
+        }
+
+        // Transcript Sync
+        const lines = document.querySelectorAll(".transcript-line");
+        lines.forEach(l => {
+            const st = parseFloat(l.dataset.start);
+            if(t >= st && t < st + 5) {
+                if(!l.classList.contains("active")) {
+                    document.querySelectorAll(".transcript-line.active").forEach(x=>x.classList.remove("active"));
+                    l.classList.add("active");
+                    l.scrollIntoView({behavior:"smooth", block:"center"});
+                }
+            }
+        });
+    });
+
+    // Canvas Loop
+    const canvas = document.getElementById("overlayCanvas");
+    const ctx = canvas.getContext("2d");
+    function renderLoop() {
+        if(Store.state.isLoading) { requestAnimationFrame(renderLoop); return; }
+
+        const v = document.getElementById("myVideo");
+        if(v.videoWidth) {
+            const r = v.getBoundingClientRect();
+            if(canvas.width !== r.width) { canvas.width=r.width; canvas.height=r.height; }
+            ctx.clearRect(0,0,r.width,r.height);
+
+            // Draw BBoxes
+            if(Store.state.isBBoxEnabled || Store.state.selectedTrackId) {
+                const fps = 25;
+                const f = Math.round(v.currentTime*fps);
+                const boxes = Store.state.tracksData[f] || [];
+
+                // Calc scale
+                const scale = Math.min(r.width/v.videoWidth, r.height/v.videoHeight);
+                const ox = (r.width - v.videoWidth*scale)/2;
+                const oy = (r.height - v.videoHeight*scale)/2;
+
+                boxes.forEach(b => {
+                    if(Store.state.filteredIds && !Store.state.filteredIds.has(b.id)) return;
+                    if(!Store.state.isBBoxEnabled && b.id !== Store.state.selectedTrackId) return;
+
+                    const isSel = b.id === Store.state.selectedTrackId;
+                    ctx.strokeStyle = isSel ? "#e17055" : "rgba(9, 132, 227, 0.6)";
+                    ctx.lineWidth = isSel ? 3 : 2;
+
+                    const [x1,y1,x2,y2] = b.box;
+                    ctx.strokeRect(ox + x1*scale, oy + y1*scale, (x2-x1)*scale, (y2-y1)*scale);
+
+                    if(isSel) {
+                        ctx.fillStyle = "#e17055";
+                        ctx.font = "bold 12px sans-serif";
+                        ctx.fillText(`ID:${b.id}`, ox + x1*scale, oy + y1*scale - 5);
+                    }
+                });
+            }
+        }
+        requestAnimationFrame(renderLoop);
+    }
+
+</script>
+</body>
+</html>
