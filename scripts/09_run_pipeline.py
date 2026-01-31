@@ -12,7 +12,7 @@ except ImportError:
     PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def run_step(py_exe: str, script: Path, args: list[str]):
+def run_step(py_exe: str, script: Path, args: List[str]):
     cmd = [py_exe, str(script)] + args
     print("\n" + "=" * 80)
     print(f"[RUN] {script.name} {' '.join(args)}")
@@ -254,4 +254,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
