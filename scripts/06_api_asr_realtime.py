@@ -278,7 +278,9 @@ def main():
         print(f"[INFO] 检测到已有音频文件: {wav_path}，跳过提取。")
 
     class DashScopeCallback(RecognitionCallback, TranscriptCallback):
-        pass
+        def __init__(self, is_sentence_end=None):
+            RecognitionCallback.__init__(self)
+            TranscriptCallback.__init__(self, is_sentence_end=is_sentence_end)
 
     callback = DashScopeCallback(is_sentence_end=RecognitionResult.is_sentence_end)
     recognition = Recognition(
