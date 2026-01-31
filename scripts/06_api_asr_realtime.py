@@ -3,24 +3,28 @@ import json
 import time
 import argparse
 import subprocess
+import importlib.util
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
-from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
-import dashscope
-
 # ================= 配置区 =================
-# 优先级：代码硬编码 > 环境变量
-# ⚠️ 请确保这里填入你的 Key（不要上传到公开仓库）
-MY_API_KEY = "sk-e284b972a1e94821a614c6feca7ff8dd"
+# 优先级：环境变量 > 代码硬编码
+# ⚠️ 不要在代码中提交真实 Key，留空即可。
+MY_API_KEY = ""
 
-if MY_API_KEY and not MY_API_KEY.startswith("sk-..."):
-    dashscope.api_key = MY_API_KEY
-else:
-    dashscope.api_key = os.environ.get("DASHSCOPE_API_KEY")
 
-if not dashscope.api_key:
-    raise ValueError("错误: 未配置 DashScope API Key。请设置 DASHSCOPE_API_KEY 或填写 MY_API_KEY。")
+def resolve_api_key() -> Optional[str]:
+    if MY_API_KEY:
+        return MY_API_KEY
+    return os.environ.get("DASHSCOPE_API_KEY")
+
+
+def ensure_transcript_file(out_dir: Path) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = out_dir / "transcript.jsonl"
+    if not transcript_path.exists():
+        transcript_path.write_text("", encoding="utf-8")
+    return transcript_path
 
 
 # ================= 工具函数 =================
@@ -160,30 +164,32 @@ def postprocess_and_write(segments: List[Dict[str, Any]], out_path: Path):
 
 
 # ================= DashScope Callback =================
-class TranscriptCallback(RecognitionCallback):
+class TranscriptCallback:
     """
     实时收集 ASR 输出，但不直接写最终文件。
     先收集 raw sentence，再统一 normalize + postprocess，保证 schema 稳定。
     """
-    def __init__(self):
-        super().__init__()
+    def __init__(self, is_sentence_end=None):
         self.raw_sentences: List[Dict[str, Any]] = []
+        self._is_sentence_end = is_sentence_end
 
     def on_complete(self) -> None:
         print("\n[INFO] 语音识别任务流关闭。")
 
-    def on_error(self, result: RecognitionResult) -> None:
+    def on_error(self, result) -> None:
         print(f"\n[ERROR] 识别出错: {getattr(result, 'message', 'unknown error')}")
 
-    def on_event(self, result: RecognitionResult) -> None:
+    def on_event(self, result) -> None:
         # DashScope 的 sentence 结构可能随模型变化
         sentence = result.get_sentence()
 
         # 只在 sentence end 时记录（避免中间 partial）
-        try:
-            is_end = RecognitionResult.is_sentence_end(sentence)
-        except Exception:
-            # 如果 API 变了，保守：只要有 text 就收集
+        if self._is_sentence_end:
+            try:
+                is_end = self._is_sentence_end(sentence)
+            except Exception:
+                is_end = bool(sentence.get("text"))
+        else:
             is_end = bool(sentence.get("text"))
 
         if not sentence or "text" not in sentence:
@@ -216,6 +222,27 @@ def main():
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = (Path(__file__).resolve().parents[1] / out_dir).resolve()
+
+    api_key = resolve_api_key()
+    if not api_key:
+        transcript_path = ensure_transcript_file(out_dir)
+        print("[WARN] 未配置 DashScope API Key，已生成空 transcript.jsonl 并跳过 ASR。")
+        print(f"[PATH] {transcript_path}")
+        return
+
+    if importlib.util.find_spec("dashscope") is None:
+        transcript_path = ensure_transcript_file(out_dir)
+        print("[WARN] 未安装 dashscope，已生成空 transcript.jsonl 并跳过 ASR。")
+        print(f"[PATH] {transcript_path}")
+        return
+
+    import dashscope
+    from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
+
+    dashscope.api_key = api_key
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     video_path = Path(args.video)
@@ -238,7 +265,12 @@ def main():
     else:
         print(f"[INFO] 检测到已有音频文件: {wav_path}，跳过提取。")
 
-    callback = TranscriptCallback()
+    class DashScopeCallback(RecognitionCallback, TranscriptCallback):
+        def __init__(self, is_sentence_end=None):
+            RecognitionCallback.__init__(self)
+            TranscriptCallback.__init__(self, is_sentence_end=is_sentence_end)
+
+    callback = DashScopeCallback(is_sentence_end=RecognitionResult.is_sentence_end)
     recognition = Recognition(
         model=args.asr_model,
         format="wav",
