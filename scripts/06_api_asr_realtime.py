@@ -10,17 +10,23 @@ from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionRes
 import dashscope
 
 # ================= 配置区 =================
-# 优先级：代码硬编码 > 环境变量
-# ⚠️ 请确保这里填入你的 Key（不要上传到公开仓库）
-MY_API_KEY = "sk-e284b972a1e94821a614c6feca7ff8dd"
+# 优先级：环境变量 > 代码硬编码
+# ⚠️ 不要在代码中提交真实 Key，留空即可。
+MY_API_KEY = ""
 
-if MY_API_KEY and not MY_API_KEY.startswith("sk-..."):
-    dashscope.api_key = MY_API_KEY
-else:
-    dashscope.api_key = os.environ.get("DASHSCOPE_API_KEY")
 
-if not dashscope.api_key:
-    raise ValueError("错误: 未配置 DashScope API Key。请设置 DASHSCOPE_API_KEY 或填写 MY_API_KEY。")
+def resolve_api_key() -> Optional[str]:
+    if MY_API_KEY:
+        return MY_API_KEY
+    return os.environ.get("DASHSCOPE_API_KEY")
+
+
+def ensure_transcript_file(out_dir: Path) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = out_dir / "transcript.jsonl"
+    if not transcript_path.exists():
+        transcript_path.write_text("", encoding="utf-8")
+    return transcript_path
 
 
 # ================= 工具函数 =================
@@ -214,6 +220,18 @@ def main():
     parser.add_argument("--force", action="store_true", help="force re-extract wav and re-run asr")
 
     args = parser.parse_args()
+
+    api_key = resolve_api_key()
+    if not api_key:
+        out_dir = Path(args.out_dir)
+        if not out_dir.is_absolute():
+            out_dir = (Path(__file__).resolve().parents[1] / out_dir).resolve()
+        transcript_path = ensure_transcript_file(out_dir)
+        print("[WARN] 未配置 DashScope API Key，已生成空 transcript.jsonl 并跳过 ASR。")
+        print(f"[PATH] {transcript_path}")
+        return
+
+    dashscope.api_key = api_key
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
