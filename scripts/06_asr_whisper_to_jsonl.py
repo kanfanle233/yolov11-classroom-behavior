@@ -3,6 +3,7 @@ import json
 import subprocess
 import argparse
 from pathlib import Path
+from typing import List
 
 # ==========================================
 # 关键修改 1：设置 Hugging Face 国内镜像，解决 SSLError 下载失败问题
@@ -11,7 +12,7 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 # ==========================================
 
-def run(cmd: list[str]) -> None:
+def run(cmd: List[str]) -> None:
     # 屏蔽 ffmpeg 输出
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
