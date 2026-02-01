@@ -190,6 +190,8 @@ def main():
     parser.add_argument("--migrate_legacy", type=int, default=0,
                         help="发现旧结构已完成时，是否自动搬迁到新结构 (1=Yes,0=No)")
     parser.add_argument("--dry_run", action="store_true", help="仅打印计划，不执行")
+    parser.add_argument("--stream_output", type=int, default=0,
+                        help="实时输出子进程日志 (1=Yes, 0=No)")
 
     args = parser.parse_args()
 
@@ -292,6 +294,10 @@ def main():
             continue
 
         video_abs_path = Path(raw_path) if Path(raw_path).is_absolute() else (paths["root"] / raw_path)
+        if not video_abs_path.exists():
+            stats["failed"] += 1
+            append_failure_log(paths["failure_log"], entry, f"Missing video file: {video_abs_path}")
+            continue
         out_dir_new, out_dir_legacy = compute_out_dirs(paths["output_root"], view_code, video_id)
 
         # 进度前缀 (显示当前剩余任务中的进度)
@@ -337,14 +343,20 @@ def main():
         # 3.4 实际执行
         loop_start = time.time()
         try:
-            subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            if args.stream_output == 1:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                )
+            else:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
 
             duration = time.time() - loop_start
             print(f"{prefix} SUCCESS ({duration:.1f}s)")
@@ -353,6 +365,8 @@ def main():
         except subprocess.CalledProcessError as e:
             stats["failed"] += 1
             err_msg = e.stderr.strip() if e.stderr else "Unknown Subprocess Error"
+            if args.stream_output == 1:
+                err_msg = f"Exit {e.returncode} (see console logs)"
             short_err = err_msg[-300:].replace("\n", " ")
             print(f"{prefix} FAILED (Exit {e.returncode}) -> {short_err}")
 

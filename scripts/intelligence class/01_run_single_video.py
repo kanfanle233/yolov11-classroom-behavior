@@ -2,7 +2,6 @@ import argparse
 import subprocess
 import sys
 import json
-import os
 from pathlib import Path
 
 
@@ -80,6 +79,9 @@ def run_single_video(video_path: str, video_id: str, out_dir: str, fps: float = 
     # 路径标准化
     video_p = Path(video_path).resolve()
     out_p = Path(out_dir).resolve()
+
+    if not ensure_exists(video_p, "输入视频"):
+        return {"status": "failed", "error": "Missing input video"}
 
     if not dry_run:
         out_p.mkdir(parents=True, exist_ok=True)
