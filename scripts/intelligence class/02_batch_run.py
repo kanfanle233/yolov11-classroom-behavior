@@ -80,13 +80,24 @@ def load_index(index_path: Path):
         sys.exit(1)
 
 
-def is_complete_outdir(out_dir: Path, min_bytes: int = 256) -> bool:
+def is_complete_outdir(out_dir: Path, min_bytes: int = 256, marker_name: str = "actions.jsonl") -> bool:
     """
-    并行模式下的判定：
-    只要文件夹存在，我们就认为有进程正在处理或已经处理完，直接跳过。
-    这样可以防止多个控制台抢同一个视频。
+    判定输出目录是否完成：需存在 marker 文件且大小达到阈值。
     """
-    return out_dir.exists()
+    if not out_dir.exists():
+        return False
+
+    marker_path = out_dir / marker_name
+    if not marker_path.exists():
+        return False
+
+    if min_bytes <= 0:
+        return True
+
+    try:
+        return marker_path.stat().st_size >= min_bytes
+    except OSError:
+        return False
 
 
 def compute_out_dirs(output_root: Path, view_code: str, video_id: str):
@@ -179,6 +190,8 @@ def main():
     parser.add_argument("--migrate_legacy", type=int, default=0,
                         help="发现旧结构已完成时，是否自动搬迁到新结构 (1=Yes,0=No)")
     parser.add_argument("--dry_run", action="store_true", help="仅打印计划，不执行")
+    parser.add_argument("--stream_output", type=int, default=0,
+                        help="实时输出子进程日志 (1=Yes, 0=No)")
 
     args = parser.parse_args()
 
@@ -281,6 +294,10 @@ def main():
             continue
 
         video_abs_path = Path(raw_path) if Path(raw_path).is_absolute() else (paths["root"] / raw_path)
+        if not video_abs_path.exists():
+            stats["failed"] += 1
+            append_failure_log(paths["failure_log"], entry, f"Missing video file: {video_abs_path}")
+            continue
         out_dir_new, out_dir_legacy = compute_out_dirs(paths["output_root"], view_code, video_id)
 
         # 进度前缀 (显示当前剩余任务中的进度)
@@ -326,14 +343,20 @@ def main():
         # 3.4 实际执行
         loop_start = time.time()
         try:
-            subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            if args.stream_output == 1:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                )
+            else:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
 
             duration = time.time() - loop_start
             print(f"{prefix} SUCCESS ({duration:.1f}s)")
@@ -342,6 +365,8 @@ def main():
         except subprocess.CalledProcessError as e:
             stats["failed"] += 1
             err_msg = e.stderr.strip() if e.stderr else "Unknown Subprocess Error"
+            if args.stream_output == 1:
+                err_msg = f"Exit {e.returncode} (see console logs)"
             short_err = err_msg[-300:].replace("\n", " ")
             print(f"{prefix} FAILED (Exit {e.returncode}) -> {short_err}")
 

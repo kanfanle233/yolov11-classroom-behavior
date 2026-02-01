@@ -1,49 +1,83 @@
-import os
+import argparse
 import shutil
-
-# 1. 设置目标根目录路径（使用原始字符串 r'' 避免反斜杠转义问题）
-base_path = r'F:\PythonProject\pythonProject\YOLOv11\output'
-
-# 2. 定义需要分类的前缀及其对应的目标文件夹名
-categories = ['front', 'top1', 'rear']
+from pathlib import Path
 
 
-def organize_output_folders(root_dir):
-    # 检查路径是否存在
-    if not os.path.exists(root_dir):
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="按前缀整理 output 目录下的视频结果")
+    parser.add_argument(
+        "--root_dir",
+        type=str,
+        default=None,
+        help="输出根目录 (默认使用项目根目录下的 output/)",
+    )
+    parser.add_argument(
+        "--categories",
+        type=str,
+        default="front,top1,rear",
+        help="需要整理的前缀列表，用逗号分隔",
+    )
+    parser.add_argument("--dry_run", action="store_true", help="只打印移动计划，不执行")
+    return parser.parse_args()
+
+
+def resolve_root_dir(root_dir: str | None) -> Path:
+    if root_dir:
+        return Path(root_dir).resolve()
+
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parents[2]
+    return project_root / "output"
+
+
+def organize_output_folders(root_dir: Path, categories: list[str], dry_run: bool) -> int:
+    if not root_dir.exists():
         print(f"错误：路径 {root_dir} 不存在。")
-        return
+        return 0
 
-    # 首先创建目标分类文件夹（front, top1, rear）
     for category in categories:
-        target_folder = os.path.join(root_dir, category)
-        if not os.path.exists(target_folder):
-            os.makedirs(target_folder)
-            print(f"创建分类文件夹: {category}")
-
-    # 遍历根目录下的所有内容
-    items = os.listdir(root_dir)
+        target_folder = root_dir / category
+        if not target_folder.exists():
+            if dry_run:
+                print(f"[DRY] 将创建分类文件夹: {target_folder}")
+            else:
+                target_folder.mkdir(parents=True, exist_ok=True)
+                print(f"创建分类文件夹: {category}")
 
     count = 0
-    for item in items:
-        item_path = os.path.join(root_dir, item)
+    for item in root_dir.iterdir():
+        if not item.is_dir():
+            continue
+        if item.name in categories:
+            continue
 
-        # 只处理文件夹，且跳过刚刚创建的三个目标文件夹
-        if os.path.isdir(item_path) and item not in categories:
-            for category in categories:
-                # 检查文件夹名称是否以指定的前缀开头
-                if item.startswith(category):
-                    destination = os.path.join(root_dir, category, item)
-                    try:
-                        shutil.move(item_path, destination)
-                        print(f"已移动: {item} -> {category}/")
-                        count += 1
-                        break  # 匹配到一个分类后即停止搜索
-                    except Exception as e:
-                        print(f"移动 {item} 时出错: {e}")
+        for category in categories:
+            if item.name.startswith(category):
+                destination = root_dir / category / item.name
+                if dry_run:
+                    print(f"[DRY] 已移动: {item.name} -> {category}/")
+                    count += 1
+                    break
+
+                try:
+                    shutil.move(str(item), str(destination))
+                    print(f"已移动: {item.name} -> {category}/")
+                    count += 1
+                    break
+                except Exception as e:
+                    print(f"移动 {item.name} 时出错: {e}")
+                break
 
     print(f"\n整理完成！共移动了 {count} 个文件夹。")
+    return count
+
+
+def main() -> None:
+    args = parse_args()
+    categories = [c.strip() for c in args.categories.split(",") if c.strip()]
+    root_dir = resolve_root_dir(args.root_dir)
+    organize_output_folders(root_dir, categories, args.dry_run)
 
 
 if __name__ == "__main__":
-    organize_output_folders(base_path)
+    main()
