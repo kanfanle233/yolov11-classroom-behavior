@@ -1,43 +1,48 @@
-import sys
+import argparse
 import subprocess
+import sys
 from pathlib import Path
 
-# ================= 配置区 (在这里修改测试参数) =================
-
-# 1. 想要测试的视频 (根据你截图里的文件)
-# 注意：这里我们使用相对路径，脚本会自动算出绝对路径
-TEST_VIDEO_REL_PATH = "YOLOv11/data/智慧课堂学生行为数据集/后方视角/0015.mp4"
-
-# 2. 给这次测试起个 ID
-TEST_VIDEO_ID = "debug_rear_0015"
-
-# 3. 是否只是打印命令而不运行？ (True=只检查路径, False=真跑)
-IS_DRY_RUN = False
+def resolve_paths() -> tuple[Path, Path]:
+    current_file = Path(__file__).resolve()
+    script_dir = current_file.parent
+    project_root = script_dir.parents[2]
+    return script_dir, project_root
 
 
-# ============================================================
+def build_parser(default_video_rel: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="单视频管线调试启动器")
+    parser.add_argument(
+        "--video",
+        default=default_video_rel,
+        help="测试视频路径（可为相对项目根目录的相对路径）",
+    )
+    parser.add_argument("--video_id", default="debug_rear_0015", help="测试视频 ID")
+    parser.add_argument("--fps", default="25", help="帧率 (传给单视频脚本)")
+    parser.add_argument("--dry_run", action="store_true", help="只打印命令，不实际执行")
+    return parser
+
 
 def main():
-    # 1. 解析路径
-    current_file = Path(__file__).resolve()
-    # 脚本所在目录 (scripts/intelligence class/)
-    script_dir = current_file.parent
-    # 项目根目录 (YOLOv11/)
-    project_root = script_dir.parents[2]
+    script_dir, project_root = resolve_paths()
 
-    # 目标执行的脚本
+    default_video_rel = "data/智慧课堂学生行为数据集/后方视角/0015.mp4"
+    parser = build_parser(default_video_rel)
+    args = parser.parse_args()
+
     target_script = script_dir / "01_run_single_video.py"
+    if not target_script.exists():
+        print(f"❌ 错误：找不到目标脚本！")
+        print(f"   路径: {target_script}")
+        return
 
-    # 视频完整路径
-    video_path = project_root / TEST_VIDEO_REL_PATH
+    video_path = Path(args.video)
+    if not video_path.is_absolute():
+        video_path = (project_root / video_path).resolve()
 
-    # 输出目录
-    out_dir = project_root / "output" / TEST_VIDEO_ID
-
-    # Python解释器 (使用当前环境的python)
+    out_dir = project_root / "output" / args.video_id
     python_exe = sys.executable
 
-    # 2. 检查文件是否存在
     if not video_path.exists():
         print(f"❌ 错误：找不到测试视频文件！")
         print(f"   路径: {video_path}")
@@ -51,25 +56,26 @@ def main():
     print(f"输出目录: {out_dir}")
     print("-" * 60)
 
-    # 3. 组装命令
     cmd = [
-        python_exe, str(target_script),
-        "--video", str(video_path),
-        "--video_id", TEST_VIDEO_ID,
-        "--out_dir", str(out_dir),
-        "--fps", "25"
+        python_exe,
+        str(target_script),
+        "--video",
+        str(video_path),
+        "--video_id",
+        args.video_id,
+        "--out_dir",
+        str(out_dir),
+        "--fps",
+        str(args.fps),
     ]
 
-    if IS_DRY_RUN:
+    if args.dry_run:
         cmd.append("--dry_run")
 
-    # 4. 调用子进程运行
     try:
-        # check=True 意味着如果脚本报错，这里也会抛出异常
         subprocess.run(cmd, check=True)
         print("\n✅ 测试运行完成！")
         print(f"请检查输出目录: {out_dir}")
-
     except subprocess.CalledProcessError as e:
         print(f"\n❌ 运行失败，退出码: {e.returncode}")
     except KeyboardInterrupt:
