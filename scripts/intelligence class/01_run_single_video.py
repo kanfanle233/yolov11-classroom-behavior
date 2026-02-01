@@ -25,12 +25,11 @@ def resolve_paths():
     return project_root, scripts_dir
 
 
-def check_script_exists(script_path: Path):
-    """检查脚本是否存在，不存在则抛出清晰错误"""
-    if not script_path.exists():
-        print(f"\n[FATAL ERROR] 找不到脚本文件！")
-        print(f"  期望路径: {script_path}")
-        print(f"  请确认该脚本是否在 scripts/ 根目录下，或者是否被移动了位置。")
+def ensure_exists(file_path: Path, desc: str) -> bool:
+    """检查文件是否存在，不存在则抛出清晰错误"""
+    if not file_path.exists():
+        print(f"\n[FATAL ERROR] 找不到{desc}！")
+        print(f"  期望路径: {file_path}")
         return False
     return True
 
@@ -111,62 +110,52 @@ def run_single_video(video_path: str, video_id: str, out_dir: str, fps: float = 
 
     python_exe = sys.executable
 
-    # ----------------------------------------------------
-    # Step 1: 姿态关键点 (02)
-    # ----------------------------------------------------
-    if not check_script_exists(script_02): return {"status": "failed", "error": "Script 02 missing"}
+    required_files = [
+        (script_02, "脚本 02_export_keypoints_jsonl.py"),
+        (script_03, "脚本 03_track_and_smooth.py"),
+        (script_04, "脚本 04_action_rules.py"),
+        (model_pose, "姿态模型 yolo11s-pose.pt"),
+    ]
+    for file_path, desc in required_files:
+        if not ensure_exists(file_path, desc):
+            return {"status": "failed", "error": f"Missing {desc}"}
 
-    cmd_pose = [
-        python_exe, str(script_02),
-        "--video", str(video_p),
-        "--out", str(path_pose_jsonl),
-        "--model", str(model_pose)
+    steps = [
+        {
+            "name": "Step 1: Pose Estimation",
+            "cmd": [
+                python_exe, str(script_02),
+                "--video", str(video_p),
+                "--out", str(path_pose_jsonl),
+                "--model", str(model_pose),
+            ],
+        },
+        {
+            "name": "Step 2: Tracking & Smoothing",
+            "cmd": [
+                python_exe, str(script_03),
+                "--video", str(video_p),
+                "--in", str(path_pose_jsonl),
+                "--out", str(path_track_jsonl),
+            ],
+        },
+        {
+            "name": "Step 3: Action Rules",
+            "cmd": [
+                python_exe, str(script_04),
+                "--in", str(path_track_jsonl),
+                "--out", str(path_actions_jsonl),
+                "--fps", str(fps),
+            ],
+        },
     ]
 
-    success, msg = run_step(cmd_pose, "Step 1: Pose Estimation", dry_run)
-    if not success:
-        result["status"] = "failed";
-        result["error"] = msg;
-        return result
-
-    # ----------------------------------------------------
-    # Step 2: 跟踪与平滑 (03)
-    # ----------------------------------------------------
-    if not check_script_exists(script_03): return {"status": "failed", "error": "Script 03 missing"}
-
-    # ⚠️ 注意：这里保留 --video 参数。
-    # 运行后请观察控制台，如果报错 "unrecognized arguments: --video"，
-    # 请根据报错手动将下面的 "--video" 改为 "--video_path" 或脚本实际需要的参数。
-    cmd_track = [
-        python_exe, str(script_03),
-        "--video", str(video_p),
-        "--in", str(path_pose_jsonl),
-        "--out", str(path_track_jsonl)
-    ]
-
-    success, msg = run_step(cmd_track, "Step 2: Tracking & Smoothing", dry_run)
-    if not success:
-        result["status"] = "failed";
-        result["error"] = msg;
-        return result
-
-    # ----------------------------------------------------
-    # Step 3: 行为识别 (04)
-    # ----------------------------------------------------
-    if not check_script_exists(script_04): return {"status": "failed", "error": "Script 04 missing"}
-
-    cmd_action = [
-        python_exe, str(script_04),
-        "--in", str(path_track_jsonl),
-        "--out", str(path_actions_jsonl),
-        "--fps", str(fps)
-    ]
-
-    success, msg = run_step(cmd_action, "Step 3: Action Rules", dry_run)
-    if not success:
-        result["status"] = "failed";
-        result["error"] = msg;
-        return result
+    for step in steps:
+        success, msg = run_step(step["cmd"], step["name"], dry_run)
+        if not success:
+            result["status"] = "failed"
+            result["error"] = msg
+            return result
 
     result["actions"] = str(path_actions_jsonl)
 
@@ -177,7 +166,7 @@ def run_single_video(video_path: str, video_id: str, out_dir: str, fps: float = 
         cmd_asr = [
             python_exe, str(script_06),
             "--video", str(video_p),
-            "--out_dir", str(out_p)
+            "--out_dir", str(out_p),
         ]
         success, msg = run_step(cmd_asr, "Step 4: ASR (Optional)", dry_run)
         if success:

@@ -80,13 +80,24 @@ def load_index(index_path: Path):
         sys.exit(1)
 
 
-def is_complete_outdir(out_dir: Path, min_bytes: int = 256) -> bool:
+def is_complete_outdir(out_dir: Path, min_bytes: int = 256, marker_name: str = "actions.jsonl") -> bool:
     """
-    并行模式下的判定：
-    只要文件夹存在，我们就认为有进程正在处理或已经处理完，直接跳过。
-    这样可以防止多个控制台抢同一个视频。
+    判定输出目录是否完成：需存在 marker 文件且大小达到阈值。
     """
-    return out_dir.exists()
+    if not out_dir.exists():
+        return False
+
+    marker_path = out_dir / marker_name
+    if not marker_path.exists():
+        return False
+
+    if min_bytes <= 0:
+        return True
+
+    try:
+        return marker_path.stat().st_size >= min_bytes
+    except OSError:
+        return False
 
 
 def compute_out_dirs(output_root: Path, view_code: str, video_id: str):
