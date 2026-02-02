@@ -300,6 +300,21 @@ def _pick_prefix_from_case_dir(case_dir: Path, case_id: Optional[str]) -> Option
     return None
 
 
+def _pick_prefix_from_case_dir(case_dir: Path, case_id: Optional[str]) -> Optional[str]:
+    if case_id:
+        return case_id
+
+    jsonls = [p for p in case_dir.glob("*.jsonl") if "behavior" not in p.name.lower()]
+    if jsonls:
+        return sorted(jsonls, key=lambda x: x.stat().st_size, reverse=True)[0].stem
+
+    metas = list(case_dir.glob("*.meta.json"))
+    if metas:
+        return sorted(metas, key=lambda x: x.stat().st_size, reverse=True)[0].stem.replace(".meta", "")
+
+    return None
+
+
 # -------------------------
 # CLI
 # -------------------------
@@ -334,7 +349,7 @@ def main():
         if long_empty_sec is None:
             long_empty_sec = 1.5 if int(args.short_video) == 1 else 3.0
         summary, _ = summarize_case(
-            view=case_dir.name,
+            view=case_dir.parent.name,
             view_dir=case_dir,
             prefix=prefix,
             max_lines=args.max_lines,
