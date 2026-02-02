@@ -104,6 +104,54 @@ def _ensure_dir(p: Path, dry_run: bool) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+def _pick_best_case_det_model(project_root: Path) -> Optional[Path]:
+    candidates = [
+        project_root / "models" / "best.pt",
+        project_root / "runs" / "detect" / "case_yolo_train" / "weights" / "best.pt",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+
+    best_by_mtime: Optional[Path] = None
+    best_mtime = -1.0
+    detect_root = project_root / "runs" / "detect"
+    if detect_root.exists():
+        for p in detect_root.rglob("best.pt"):
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > best_mtime:
+                best_mtime = mtime
+                best_by_mtime = p
+    return best_by_mtime
+
+
+def _pick_best_pose_model(project_root: Path) -> Optional[Path]:
+    candidates = [
+        project_root / "yolo11l-pose.pt",
+        project_root / "yolo11m-pose.pt",
+        project_root / "yolo11s-pose.pt",
+        project_root / "yolo11n-pose.pt",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+
+    best_by_mtime: Optional[Path] = None
+    best_mtime = -1.0
+    for p in project_root.glob("*-pose.pt"):
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best_mtime = mtime
+            best_by_mtime = p
+    return best_by_mtime
+
+
 # =====================================================================================
 # 1.5) 视频转码工具
 # =====================================================================================
@@ -543,16 +591,37 @@ def run_single_video(
         action_head_down_sec = 0.7
         action_stand_sec = 0.7
 
+    used_case_det_model: Optional[str] = None
+    used_pose_model: Optional[str] = None
+
     # ========= Step 0: Case Det (best.pt) =========
-    if int(case_det) == 1 and str(case_det_model).strip():
-        model_case = resolve_under_project(project_root, str(case_det_model))
+    if int(case_det) == 1:
+        model_case = None
+        if str(case_det_model).strip():
+            model_case = resolve_under_project(project_root, str(case_det_model))
+            if not model_case.exists():
+                print(f"[WARN] case_det_model not found: {model_case}")
+                model_case = None
+        if model_case is None:
+            model_case = _pick_best_case_det_model(project_root)
+        if model_case is None:
+            return {"status": "failed", "error": "case_det_model not found", "video_id": video_id}
+        used_case_det_model = str(model_case)
         ok, msg = run_case_det(video_p, path_case_det_jsonl, model_case, float(case_conf), fps, dry_run, skip_existing)
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
 
     # ========= Step 1: Pose =========
     if int(run_pose) == 1 and check_script_exists(script_pose):
-        pose_model_path = resolve_under_project(project_root, pose_model)
+        pose_model_path = resolve_under_project(project_root, pose_model) if pose_model else None
+        if pose_model_path and not pose_model_path.exists():
+            print(f"[WARN] pose_model not found: {pose_model_path}")
+            pose_model_path = None
+        if pose_model_path is None:
+            pose_model_path = _pick_best_pose_model(project_root)
+        if pose_model_path is None:
+            return {"status": "failed", "error": "pose_model not found", "video_id": video_id}
+        used_pose_model = str(pose_model_path)
         cmd = [
             python_exe, str(script_pose),
             "--video", str(video_p),
@@ -665,8 +734,8 @@ def run_single_video(
         export_behavior=bool(int(export_behavior)),
         make_overlays=bool(int(make_overlays)),
         view_name=view_name,
-        pose_model=str(pose_model) if pose_model else None,
-        case_det_model=str(case_det_model) if case_det_model else None,
+        pose_model=used_pose_model or (str(pose_model) if pose_model else None),
+        case_det_model=used_case_det_model or (str(case_det_model) if case_det_model else None),
     )
 
     # ========= Step 5: Align =========
