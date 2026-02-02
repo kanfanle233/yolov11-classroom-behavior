@@ -27,10 +27,10 @@ def load_jsonl(path: Path) -> List[Dict]:
 # ===========================
 
 def compress_frame_dets(
-        det_rows: List[Dict],
-        fps: float,
-        min_duration: float = 1.0,
-        gap_tolerance: float = 0.5
+    det_rows: List[Dict],
+    fps: float,
+    min_duration: float = 1.0,
+    gap_tolerance: float = 0.5,
 ) -> List[Dict]:
     """
     将逐帧的 YOLO 检测结果压缩成“事件段”。
@@ -100,9 +100,9 @@ def compress_frame_dets(
 
 
 def align_events(
-        visual_events: List[Dict],
-        transcript_segs: List[Dict],
-        window_sec: float = 2.0
+    visual_events: List[Dict],
+    transcript_segs: List[Dict],
+    window_sec: float = 2.0,
 ) -> List[Dict]:
     """
     以视觉事件为核心，寻找时间上重叠（overlap）或临近的文本。
@@ -153,8 +153,12 @@ def align_events(
 # ===========================
 
 def run_alignment(
-        case_dir: Path,
-        fps: float = 25.0
+    case_dir: Path,
+    fps: float = 25.0,
+    min_action_sec: float = 0.5,
+    min_det_sec: float = 0.8,
+    gap_tolerance: float = 0.5,
+    window_sec: float = 2.0,
 ):
     print(f"[Align] Processing {case_dir.name}...")
 
@@ -186,7 +190,12 @@ def run_alignment(
         if fidx is not None and act and act != "stand":
             raw_action_rows.append({"frame_idx": fidx, "dets": [{"label": act}]})  # 伪造成 dets 格式以便复用压缩函数
 
-    compressed_actions = compress_frame_dets(raw_action_rows, fps, min_duration=0.5)  # 动作稍微短点也可以
+    compressed_actions = compress_frame_dets(
+        raw_action_rows,
+        fps,
+        min_duration=min_action_sec,
+        gap_tolerance=gap_tolerance,
+    )
     for c in compressed_actions:
         c["type"] = "rule_pose"  # 标记来源
     all_visual_events.extend(compressed_actions)
@@ -194,7 +203,12 @@ def run_alignment(
     # B. 处理 YOLO Behaviors
     # 过滤掉空的 dets
     valid_det_rows = [r for r in det_data if r.get("dets")]
-    compressed_dets = compress_frame_dets(valid_det_rows, fps, min_duration=0.8)
+    compressed_dets = compress_frame_dets(
+        valid_det_rows,
+        fps,
+        min_duration=min_det_sec,
+        gap_tolerance=gap_tolerance,
+    )
     all_visual_events.extend(compressed_dets)
 
     if not all_visual_events:
@@ -205,7 +219,7 @@ def run_alignment(
         return
 
     # 3. 执行对齐
-    alignment_result = align_events(all_visual_events, trans_data, window_sec=2.0)
+    alignment_result = align_events(all_visual_events, trans_data, window_sec=window_sec)
 
     # 4. 输出
     out_file = case_dir / "align.json"
@@ -219,6 +233,31 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--case_dir", required=True, help="具体的 Case 目录，例如 .../rear__006")
     parser.add_argument("--fps", type=float, default=30.0)
+    parser.add_argument("--short_video", type=int, default=0)
+    parser.add_argument("--min_action_sec", type=float, default=None)
+    parser.add_argument("--min_det_sec", type=float, default=None)
+    parser.add_argument("--gap_tolerance", type=float, default=None)
+    parser.add_argument("--window_sec", type=float, default=None)
     args = parser.parse_args()
 
-    run_alignment(Path(args.case_dir), args.fps)
+    min_action_sec = args.min_action_sec
+    min_det_sec = args.min_det_sec
+    gap_tolerance = args.gap_tolerance
+    window_sec = args.window_sec
+    if min_action_sec is None:
+        min_action_sec = 0.3 if int(args.short_video) == 1 else 0.5
+    if min_det_sec is None:
+        min_det_sec = 0.5 if int(args.short_video) == 1 else 0.8
+    if gap_tolerance is None:
+        gap_tolerance = 0.3 if int(args.short_video) == 1 else 0.5
+    if window_sec is None:
+        window_sec = 1.0 if int(args.short_video) == 1 else 2.0
+
+    run_alignment(
+        Path(args.case_dir),
+        args.fps,
+        min_action_sec=min_action_sec,
+        min_det_sec=min_det_sec,
+        gap_tolerance=gap_tolerance,
+        window_sec=window_sec,
+    )

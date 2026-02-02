@@ -6,7 +6,7 @@ from pathlib import Path
 
 # 1. 想要测试的视频 (根据你截图里的文件)
 # 注意：这里我们使用相对路径，脚本会自动算出绝对路径
-TEST_VIDEO_REL_PATH = "YOLOv11/data/智慧课堂学生行为数据集/后方视角/0015.mp4"
+TEST_VIDEO_REL_PATH = "data/智慧课堂学生行为数据集/后方视角/0015.mp4"
 
 # 2. 给这次测试起个 ID
 TEST_VIDEO_ID = "debug_rear_0015"
@@ -20,16 +20,16 @@ IS_DRY_RUN = False
 def main():
     # 1. 解析路径
     current_file = Path(__file__).resolve()
-    # 脚本所在目录 (scripts/intelligence class/)
-    script_dir = current_file.parent
-    # 项目根目录 (YOLOv11/)
-    project_root = script_dir.parents[2]
-
-    # 目标执行的脚本
-    target_script = script_dir / "01_run_single_video.py"
+    for p in [current_file] + list(current_file.parents):
+        if (p / "data").exists() and (p / "scripts").exists():
+            sys.path.insert(0, str(p))
+            break
+    from scripts.intelligence_class._utils.pathing import find_project_root, find_sibling_script, resolve_under_project
+    project_root = find_project_root(current_file)
+    target_script = find_sibling_script("01_run_single_video.py", start_file=current_file, project_root=project_root)
 
     # 视频完整路径
-    video_path = project_root / TEST_VIDEO_REL_PATH
+    video_path = resolve_under_project(project_root, TEST_VIDEO_REL_PATH)
 
     # 输出目录
     out_dir = project_root / "output" / TEST_VIDEO_ID

@@ -135,7 +135,13 @@ def _get_frame_idx(frame_obj: Any) -> Optional[int]:
     return None
 
 
-def summarize_case(view: str, view_dir: Path, prefix: str, max_lines: int = 200000) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def summarize_case(
+    view: str,
+    view_dir: Path,
+    prefix: str,
+    max_lines: int = 200000,
+    long_empty_sec: float = 3.0,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     meta_path = find_meta(view_dir, prefix)
     main_path = find_main_jsonl(view_dir, prefix)
 
@@ -224,7 +230,7 @@ def summarize_case(view: str, view_dir: Path, prefix: str, max_lines: int = 2000
         flags.append("MOSTLY_EMPTY")
     elif missing_rate >= 0.5:
         flags.append("MANY_EMPTY_FRAMES")
-    if max_consecutive_empty >= int(max(1, fps * 3)):  # 连续 >=3 秒无人
+    if max_consecutive_empty >= int(max(1, fps * long_empty_sec)):
         flags.append("LONG_EMPTY_SEGMENT")
     if avg_conf < 0.2 and conf_n > 0:
         flags.append("LOW_CONF")
@@ -288,6 +294,8 @@ def main():
     ap.add_argument("--view", type=str, default="", help="只处理某个视角（可选）")
     ap.add_argument("--id", type=str, default="", help="只处理某个 case 前缀（可选，如 0001/001/1）")
     ap.add_argument("--max_lines", type=int, default=200000, help="单个 jsonl 最多读取多少行（防止超大文件拖死）")
+    ap.add_argument("--short_video", type=int, default=0, help="short video mode for stricter empty-segment flags")
+    ap.add_argument("--long_empty_sec", type=float, default=None, help="seconds for LONG_EMPTY_SEGMENT flag")
     ap.add_argument("--overwrite", type=int, default=0, help="1=覆盖已有 _summary.json")
     args = ap.parse_args()
 
@@ -332,7 +340,16 @@ def main():
                 view_skipped += 1  # ✅ 新增
                 continue
 
-            summary, _ = summarize_case(view_name, vd, pref, max_lines=args.max_lines)
+            long_empty_sec = args.long_empty_sec
+            if long_empty_sec is None:
+                long_empty_sec = 1.5 if int(args.short_video) == 1 else 3.0
+            summary, _ = summarize_case(
+                view_name,
+                vd,
+                pref,
+                max_lines=args.max_lines,
+                long_empty_sec=long_empty_sec,
+            )
             safe_write_json(out_path, summary)
             written += 1
             view_written += 1  # ✅ 新增
