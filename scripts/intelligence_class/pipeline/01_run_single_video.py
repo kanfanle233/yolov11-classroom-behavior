@@ -245,7 +245,12 @@ def run_case_det(
 # 3) 子进程 runner
 # =====================================================================================
 
-def run_step(cmd: List[str], step_name: str, dry_run: bool = False) -> Tuple[bool, str]:
+def run_step(
+    cmd: List[str],
+    step_name: str,
+    dry_run: bool = False,
+    log_dir: Optional[Path] = None,
+) -> Tuple[bool, str]:
     print("\n" + "=" * 60)
     print(f"[执行] {step_name}")
     print(f"      CMD: {' '.join(cmd)}")
@@ -255,7 +260,15 @@ def run_step(cmd: List[str], step_name: str, dry_run: bool = False) -> Tuple[boo
         return True, "Dry Run"
 
     try:
-        subprocess.run(cmd, check=True)
+        if log_dir is None:
+            subprocess.run(cmd, check=True)
+            return True, "Success"
+
+        log_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = step_name.replace(" ", "_").replace(":", "_")
+        log_path = log_dir / f"{safe_name}.log"
+        with log_path.open("w", encoding="utf-8") as f:
+            subprocess.run(cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
         return True, "Success"
     except subprocess.CalledProcessError as e:
         msg = f"步骤执行失败，退出码 {e.returncode}."
@@ -467,6 +480,9 @@ def run_single_video(
     run_timeline: int = 1,
     timeline_source: str = "behavior",                 # auto|actions|behavior
     timeline_tracks: str = "pose_tracks_smooth.jsonl", # 相对 case_dir
+    # short video + logging
+    short_video: int = 0,
+    log_dir: Optional[str] = None,
     # models
     pose_model: str = "yolo11s-pose.pt",
     asr_model: str = "base",
@@ -502,6 +518,24 @@ def run_single_video(
     script_timeline = tools_dir / "xx_generate_timeline_viz.py"
 
     python_exe = sys.executable
+    log_dir_path = Path(log_dir).resolve() if log_dir else (out_p / "logs")
+    if dry_run:
+        log_dir_path = None
+
+    if int(short_video) == 1:
+        track_min_frames = 10
+        track_max_miss = 6
+        action_min_track_frames = 10
+        action_raise_hand_sec = 0.3
+        action_head_down_sec = 0.4
+        action_stand_sec = 0.4
+    else:
+        track_min_frames = 30
+        track_max_miss = 10
+        action_min_track_frames = 30
+        action_raise_hand_sec = 0.5
+        action_head_down_sec = 0.7
+        action_stand_sec = 0.7
 
     # ========= Step 0: Case Det (best.pt) =========
     if int(case_det) == 1 and str(case_det_model).strip():
@@ -519,16 +553,28 @@ def run_single_video(
             "--out", str(path_pose_jsonl),
             "--model", str(pose_model_path),
         ]
-        ok, msg = run_step(cmd, "步骤 1: 姿态估计", dry_run)
+        ok, msg = run_step(cmd, "步骤 1: 姿态估计", dry_run, log_dir_path)
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
 
     # ========= Step 2: Track =========
     if int(run_track) == 1 and check_script_exists(script_track) and check_script_exists(script_attach):
         ok, msg = run_step(
-            [python_exe, str(script_track), "--in", str(path_pose_jsonl), "--out", str(path_track_jsonl)],
+            [
+                python_exe,
+                str(script_track),
+                "--in",
+                str(path_pose_jsonl),
+                "--out",
+                str(path_track_jsonl),
+                "--min_frames",
+                str(track_min_frames),
+                "--max_miss",
+                str(track_max_miss),
+            ],
             "步骤 2: 轨迹跟踪",
             dry_run,
+            log_dir_path,
         )
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
@@ -543,6 +589,7 @@ def run_single_video(
             ],
             "步骤 2.5: 关联关键点",
             dry_run,
+            log_dir_path,
         )
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
@@ -550,9 +597,27 @@ def run_single_video(
     # ========= Step 3: Actions =========
     if int(run_actions) == 1 and check_script_exists(script_actions):
         ok, msg = run_step(
-            [python_exe, str(script_actions), "--in", str(path_track_kpts_jsonl), "--out", str(path_actions_jsonl), "--fps", str(float(fps))],
+            [
+                python_exe,
+                str(script_actions),
+                "--in",
+                str(path_track_kpts_jsonl),
+                "--out",
+                str(path_actions_jsonl),
+                "--fps",
+                str(float(fps)),
+                "--raise_hand_sec",
+                str(action_raise_hand_sec),
+                "--head_down_sec",
+                str(action_head_down_sec),
+                "--stand_sec",
+                str(action_stand_sec),
+                "--min_track_frames",
+                str(action_min_track_frames),
+            ],
             "步骤 3: 动作规则",
             dry_run,
+            log_dir_path,
         )
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
@@ -563,6 +628,7 @@ def run_single_video(
             [python_exe, str(script_asr), "--video", str(video_p), "--out_dir", str(out_p), "--model", str(asr_model)],
             "步骤 4: 语音转写",
             dry_run,
+            log_dir_path,
         )
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
@@ -592,6 +658,7 @@ def run_single_video(
                 [python_exe, str(script_align), "--case_dir", str(out_p), "--fps", str(float(fps))],
                 "步骤 5: 多模态对齐",
                 dry_run,
+                log_dir_path,
             )
             if not ok:
                 return {"status": "failed", "error": msg, "video_id": video_id}
@@ -602,6 +669,7 @@ def run_single_video(
             [python_exe, str(script_sum), "--out_root", str(out_p.parent.parent), "--view", str(out_p.parent.name), "--id", str(case_id), "--overwrite", "1"],
             "步骤 6: 案例报告",
             dry_run,
+            log_dir_path,
         )
 
     if int(run_aggregate) == 1 and check_script_exists(script_agg):
@@ -609,6 +677,7 @@ def run_single_video(
             [python_exe, str(script_agg), "--ds_root", str(out_p.parent.parent), "--views", str(out_p.parent.name)],
             "步骤 7: 聚合报表",
             dry_run,
+            log_dir_path,
         )
 
     if int(run_projection) == 1 and check_script_exists(script_proj):
@@ -616,6 +685,7 @@ def run_single_video(
             [python_exe, "-W", "ignore", str(script_proj), "--root", str(out_p.parent.parent), "--target_case", str(out_p)],
             "步骤 8: 静态投影",
             dry_run,
+            log_dir_path,
         )
 
     # ========= Step 9: Timeline Viz =========
@@ -635,7 +705,7 @@ def run_single_video(
                 tracks_path = out_p / tracks_path
             cmd += ["--tracks", str(tracks_path)]
 
-        run_step(cmd, "步骤 9: 生成时间轴可视化", dry_run)
+        run_step(cmd, "步骤 9: 生成时间轴可视化", dry_run, log_dir_path)
 
     return {"status": "success", "video_id": video_id, "case_id": case_id, "out_dir": str(out_p)}
 
@@ -676,6 +746,8 @@ def main():
     parser.add_argument("--run_timeline", type=int, default=1)
     parser.add_argument("--timeline_source", default="behavior", choices=["auto", "actions", "behavior"])
     parser.add_argument("--timeline_tracks", default="pose_tracks_smooth.jsonl")
+    parser.add_argument("--short_video", type=int, default=0, help="optimize thresholds for short videos (6-20s)")
+    parser.add_argument("--log_dir", type=str, default=None, help="store subprocess logs (stdout+stderr)")
 
     args = parser.parse_args()
 
@@ -705,6 +777,8 @@ def main():
         run_timeline=int(args.run_timeline),
         timeline_source=str(args.timeline_source),
         timeline_tracks=str(args.timeline_tracks),
+        short_video=int(args.short_video),
+        log_dir=str(args.log_dir) if args.log_dir else None,
         pose_model=str(args.pose_model),
         asr_model=str(args.asr_model),
     )
