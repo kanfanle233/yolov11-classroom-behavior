@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Classroom Analytics | Dashboard</title>
+
+    <!-- 依赖库 CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <!-- 图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* 核心布局样式 */
+        :root {
+            --bg-body: #f1f5f9;
+            --bg-card: #ffffff;
+            --border-color: #e2e8f0;
+            --accent: #3b82f6;
+            --selection: #ef4444;
+        }
+
+        body {
+            background-color: var(--bg-body);
+            color: #1e293b;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .app-grid {
+            display: grid;
+            grid-template-columns: 260px 1fr 340px;
+            grid-template-rows: 56px 1fr 340px;
+            height: 100vh;
+            gap: 12px;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            font-size: 0.8rem;
+            color: #64748b;
+            background: #f8fafc;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .scroll-area { overflow-y: auto; flex: 1; }
+        .glyph-group { cursor: pointer; transition: opacity 0.2s; }
+        .gantt-rect { cursor: pointer; shape-rendering: crispEdges; }
+        .pc-line { fill: none; stroke-linejoin: round; transition: opacity 0.2s; mix-blend-mode: multiply; }
+
+        .video-container { position: relative; width: 100%; height: 100%; background: #000; display: flex; justify-content: center; align-items: center; }
+        video { max-width: 100%; max-height: 100%; object-fit: contain; }
+        canvas { position: absolute; top: 0; left: 0; pointer-events: none; width: 100%; height: 100%; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 100; background: #1e293b; color: white; padding: 12px 20px; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.1); font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }
+
+        /* JSON Tree styling */
+        .json-key { color: #64748b; font-weight: 500; }
+        .json-string { color: #059669; }
+        .json-number { color: #d97706; }
+        .json-boolean { color: #7c3aed; }
+        .json-null { color: #9ca3af; }
+    </style>
+</head>
+<body>
+    <div id="app" class="app-grid">
+
+        <!-- 1. Header -->
+        <header class="card col-span-3 flex-row items-center px-4 justify-between" style="grid-row: 1;">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">
+                    <i class="fa-solid fa-eye"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-gray-800 text-sm leading-tight">Smart Classroom Analytics</h1>
+                    <div class="text-[10px] text-gray-400 font-mono uppercase tracking-widest">Pipeline Live Dashboard</div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div v-if="codecIssueDetected" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded border border-amber-200 flex items-center gap-2 cursor-help" @click="infoTab='codec'">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Codec Issue
+                </div>
+                <div class="flex items-center gap-2 text-xs bg-gray-100 px-3 py-1.5 rounded-full border border-gray-200 transition-colors" :class="{'bg-red-50 border-red-100': connectionError}">
+                    <span :class="['w-2 h-2 rounded-full', apiStatus.color, apiStatus.text === 'Online' ? 'animate-pulse' : '']"></span>
+                    <span class="text-gray-600 font-medium">{{ apiStatus.text }}</span>
+                </div>
+                <button class="bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-blue-700 transition shadow-sm flex items-center gap-2" @click="showRunDialog = true" :disabled="connectionError">
+                    <i class="fa-solid fa-play"></i> Run Analysis
+                </button>
+            </div>
+        </header>
+
+        <!-- 2. Sidebar: Case Repository -->
+        <aside class="card" style="grid-column: 1; grid-row: 2 / 4;">
+            <div class="card-header text-xs uppercase tracking-wider">
+                <span>Case Repository</span>
+                <span class="bg-gray-200 text-gray-600 px-1.5 rounded text-[10px]">{{ totalCases }}</span>
+            </div>
+            <div class="scroll-area p-2 space-y-4">
+                <div v-if="loading" class="text-center p-4 text-gray-400 text-xs">
+                    <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Loading cases...
+                </div>
+                <div v-for="(cases, viewName) in casesByView" :key="viewName">
+                    <div class="text-[10px] font-bold text-gray-400 uppercase mb-2 px-2 tracking-wider flex items-center gap-1">
+                        <i class="fa-solid fa-camera"></i> {{ viewName }}
+                    </div>
+                    <div class="space-y-1">
+                        <div v-for="c in cases" :key="c.id" @click="loadCase(c)"
+                             :class="['px-3 py-2 rounded cursor-pointer text-xs flex justify-between items-center transition border border-transparent', currentCase && currentCase.id === c.id ? 'bg-blue-50 text-blue-700 border-blue-200 font-medium shadow-sm' : 'hover:bg-gray-50 text-gray-600']">
+                            <div class="flex flex-col overflow-hidden">
+                                <span class="truncate font-medium">Case {{ c.id }}</span>
+                                <span class="text-[9px] text-gray-400 flex items-center gap-1">
+                                    <span v-if="c.frames">{{ c.frames }}f</span>
+                                    <span v-if="c.fps" class="text-gray-300">|</span>
+                                    <span v-if="c.fps">{{ c.fps.toFixed(1) }}fps</span>
+                                </span>
+                            </div>
+                            <span v-if="c.loaded" class="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Analysis Ready"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 3. Main Projection (Manifold) -->
+        <main class="card relative" style="grid-column: 2; grid-row: 2;">
+            <div class="card-header">
+                <div class="flex items-center gap-2">
+                    <span class="uppercase tracking-wider text-xs">Behavior Manifold</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-mono">PCA</span>
+                </div>
+                <div class="flex gap-2">
+                    <button @click="projectionMethod='pca'; loadProjection()" :class="['text-[10px] px-2 py-0.5 rounded transition', projectionMethod==='pca'?'bg-gray-600 text-white':'text-gray-400 hover:bg-gray-100']">PCA</button>
+                    <button @click="projectionMethod='tsne'; loadProjection()" :class="['text-[10px] px-2 py-0.5 rounded transition', projectionMethod==='tsne'?'bg-gray-600 text-white':'text-gray-400 hover:bg-gray-100']">t-SNE</button>
+                </div>
+            </div>
+            <div class="relative flex-1 bg-slate-50 overflow-hidden" ref="projectionContainer">
+                <div v-if="!projectionData.length" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+                    <i class="fa-regular fa-chart-bar text-2xl mb-2 opacity-20"></i>
+                    <span class="text-xs">Select a case to view manifold</span>
+                </div>
+                <svg id="projection-svg" class="w-full h-full"></svg>
+            </div>
+        </main>
+
+        <!-- 4. Stats & Details (Right Sidebar) -->
+        <aside class="flex flex-col gap-3" style="grid-column: 3; grid-row: 2 / 4;">
+            <!-- Top: Charts -->
+            <div class="card flex-1 flex flex-col min-h-0">
+                <div class="card-header">
+                    <div class="flex gap-1 bg-gray-100 p-0.5 rounded w-full">
+                        <button @click="statsTab = 'gantt'" :class="['flex-1 py-0.5 text-[10px] rounded font-medium transition text-center', statsTab==='gantt' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">Timeline</button>
+                        <button @click="statsTab = 'features'" :class="['flex-1 py-0.5 text-[10px] rounded font-medium transition text-center', statsTab==='features' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">Features</button>
+                    </div>
+                </div>
+                <div class="flex-1 relative overflow-hidden bg-white">
+                    <div v-show="statsTab === 'gantt'" class="absolute inset-0 p-2" ref="ganttContainer">
+                        <svg id="gantt-svg" class="w-full h-full"></svg>
+                        <div v-if="ganttCursorLeft > 0" class="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none z-10 shadow-[0_0_4px_rgba(239,68,68,0.5)]" :style="{ left: ganttCursorLeft + 'px' }"></div>
+                    </div>
+                    <div v-show="statsTab === 'features'" class="absolute inset-0 p-2" ref="parcoordsContainer">
+                        <svg id="parcoords-svg" class="w-full h-full"></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom: Details Tabs -->
+            <div class="card h-[280px] shrink-0">
+                <div class="card-header pt-2 pb-2 block">
+                    <!-- Tabs -->
+                    <div class="flex space-x-1 bg-slate-100 p-0.5 rounded overflow-x-auto no-scrollbar">
+                         <button @click="infoTab='transcript'" :class="infoTab==='transcript' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'" class="px-2 py-1 text-[10px] font-medium rounded transition-all whitespace-nowrap">Transcript</button>
+                         <button @click="infoTab='student'" :class="infoTab==='student' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'" class="px-2 py-1 text-[10px] font-medium rounded transition-all whitespace-nowrap">Student</button>
+                         <button @click="infoTab='files'" :class="infoTab==='files' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'" class="px-2 py-1 text-[10px] font-medium rounded transition-all whitespace-nowrap">Files</button>
+                         <button @click="infoTab='debug'" :class="infoTab==='debug' ? 'bg-white shadow text-purple-600' : 'text-gray-500 hover:text-gray-700'" class="px-2 py-1 text-[10px] font-medium rounded transition-all whitespace-nowrap"><i class="fa-solid fa-bug"></i> Debug</button>
+                         <button v-if="codecIssueDetected" @click="infoTab='codec'" class="px-2 py-1 text-[10px] font-medium rounded transition-all whitespace-nowrap bg-amber-100 text-amber-700"><i class="fa-solid fa-wrench"></i></button>
+                    </div>
+
+                    <!-- Sub-header info -->
+                    <div class="mt-1 flex justify-between items-center h-4">
+                         <span v-if="selectedTrackId !== null && infoTab==='student'" class="font-mono text-[9px] bg-blue-100 text-blue-700 px-1.5 rounded">ID: {{ selectedTrackId }}</span>
+                         <span v-if="mediaDebug && infoTab==='debug'" class="font-mono text-[9px] text-gray-400">Media Debug Active</span>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-y-auto relative bg-white custom-scrollbar">
+
+                    <!-- 1. Transcript Tab -->
+                    <div v-if="infoTab==='transcript'" class="p-3 h-full">
+                        <div class="flex justify-between items-center text-[10px] text-gray-400 mb-2 border-b border-gray-100 pb-1">
+                            <span class="font-bold tracking-wider">LIVE CAPTIONS</span>
+                            <span class="font-mono text-blue-500">{{ currentTime.toFixed(1) }}s</span>
+                        </div>
+                        <div v-if="activeTranscript.length === 0" class="text-[10px] text-gray-400 italic text-center mt-4">No speech detected...</div>
+                        <div v-for="(t, idx) in activeTranscript" :key="idx" class="text-xs text-slate-700 animate-fade-in bg-slate-50 p-2 rounded border border-slate-100 shadow-sm mb-2">
+                            <span class="font-mono text-blue-400 text-[9px] mr-1 block mb-1">[{{ t.start.toFixed(1) }}s - {{ t.end.toFixed(1) }}s]</span>
+                            {{ t.text }}
+                        </div>
+                    </div>
+
+                    <!-- 2. Student Tab -->
+                    <div v-else-if="infoTab==='student'" class="p-4 h-full">
+                        <div v-if="selectedTrackId === null" class="h-full flex flex-col items-center justify-center text-gray-400">
+                            <i class="fa-solid fa-arrow-pointer mb-2 opacity-30 text-lg"></i>
+                            <span class="text-xs">Click a student on screen or chart</span>
+                        </div>
+                        <div v-else class="animate-fade-in">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div :class="['w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-md', insightData.moodColor]">
+                                    {{ selectedTrackId }}
+                                </div>
+                                <div><div class="font-bold text-gray-800">{{ insightData.mood }}</div><div class="text-[10px] text-gray-400">Primary State</div></div>
+                            </div>
+                            <div v-for="(pct, act) in insightData.topActions" :key="act" class="flex items-center gap-2 text-xs mb-2">
+                                <span class="w-16 text-gray-500 truncate capitalize">{{ act }}</span>
+                                <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-blue-500 rounded-full" :style="{ width: pct + '%' }"></div></div>
+                                <span class="w-8 text-right font-mono text-gray-400">{{ pct }}%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Files Tab -->
+                    <div v-else-if="infoTab==='files'" class="p-0 h-full">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-gray-50 text-[9px] text-gray-500 uppercase font-bold sticky top-0">
+                                <tr>
+                                    <th class="px-3 py-2 border-b">File</th>
+                                    <th class="px-2 py-2 border-b text-right">Size</th>
+                                    <th class="px-2 py-2 border-b text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-[10px] text-gray-700">
+                                <tr v-for="f in filesList" :key="f.name" class="hover:bg-gray-50 border-b border-gray-100 last:border-0 transition-colors">
+                                    <td class="px-3 py-2 font-mono truncate max-w-[120px]" :title="f.name">
+                                        <i v-if="f.suffix==='.json'||f.suffix==='.jsonl'" class="fa-regular fa-file-code text-yellow-500 mr-1"></i>
+                                        <i v-else-if="f.suffix==='.mp4'" class="fa-regular fa-file-video text-blue-500 mr-1"></i>
+                                        <i v-else-if="f.suffix==='.wav'" class="fa-solid fa-music text-purple-500 mr-1"></i>
+                                        <span :class="{'font-bold text-blue-700': currentPlayingFile === f.name}">{{ f.name }}</span>
+                                    </td>
+                                    <td class="px-2 py-2 text-right text-gray-400">{{ formatSize(f.size) }}</td>
+                                    <td class="px-2 py-2 text-right">
+                                        <button v-if="f.suffix==='.mp4'" @click="playMediaFile(f.name, 'video')" class="hover:text-blue-600 text-gray-400 px-1"><i class="fa-solid fa-play"></i></button>
+                                        <button v-if="f.suffix==='.wav'" @click="playMediaFile(f.name, 'audio')" class="hover:text-purple-600 text-gray-400 px-1"><i class="fa-solid fa-play"></i></button>
+                                        <a v-if="f.suffix==='.json'||f.suffix==='.jsonl'" :href="getFileUrl(f.name)" target="_blank" class="hover:text-gray-800 text-gray-400 px-1"><i class="fa-solid fa-up-right-from-square"></i></a>
+                                    </td>
+                                </tr>
+                                <tr v-if="filesList.length===0"><td colspan="3" class="p-4 text-center text-gray-400">No files found</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- 4. Debug Tab (NEW) -->
+                    <div v-else-if="infoTab==='debug'" class="p-3 h-full font-mono text-[10px] bg-slate-50">
+                         <div v-if="!mediaDebug" class="text-center text-gray-400 mt-4">No debug info available</div>
+                         <div v-else>
+                            <div class="mb-2 font-bold text-gray-600">MEDIA RESOLUTION DEBUG</div>
+                            <div class="whitespace-pre-wrap break-all text-gray-600 leading-relaxed bg-white border border-gray-200 p-2 rounded shadow-sm" v-html="syntaxHighlight(mediaDebug)"></div>
+
+                            <div class="mt-4 font-bold text-gray-600">CURRENT VIDEO URL</div>
+                            <div class="text-blue-600 break-all p-1 bg-blue-50 rounded">{{ currentVideoUrl || 'None' }}</div>
+                         </div>
+                    </div>
+
+                    <!-- 5. Codec Fix Panel -->
+                    <div v-else-if="infoTab==='codec'" class="p-4 h-full bg-amber-50/50">
+                        <div class="text-xs font-bold text-amber-700 mb-2 flex items-center gap-2">
+                            <i class="fa-solid fa-wrench"></i> 视频编码修复指南
+                        </div>
+                        <p class="text-[10px] text-amber-600 mb-3 leading-relaxed">
+                            浏览器不支持当前视频的 <code>mp4v</code> 编码。
+                        </p>
+                        <div class="bg-slate-800 rounded p-2 text-[9px] text-slate-300 font-mono mb-2 overflow-x-auto whitespace-pre">
+# 修改 01_run_single_video.py
+fourcc = cv2.VideoWriter_fourcc(*'H264')
+# 或者
+fourcc = cv2.VideoWriter_fourcc(*'avc1')
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 5. Video Player -->
+        <footer class="card" style="grid-column: 2; grid-row: 3;">
+            <div class="video-container group" ref="videoWrapper">
+                <!-- Video Controls Overlay -->
+                <div class="absolute top-3 right-3 z-20 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <span v-if="isAudioMode" class="px-2 py-1 text-[10px] font-bold bg-purple-600 text-white rounded shadow animate-pulse">
+                        <i class="fa-solid fa-music mr-1"></i> AUDIO MODE
+                    </span>
+                    <button v-for="mode in ['final','pose','original']" :key="mode" @click="changeViewMode(mode)"
+                            :disabled="mode==='pose' && !currentMediaUrls.pose"
+                            :class="[
+                              'px-2 py-1 text-[10px] uppercase font-bold tracking-wider rounded border backdrop-blur-sm transition',
+                              (mode==='pose' && !currentMediaUrls.pose)
+                                ? 'bg-black/40 text-gray-400 border-white/10 opacity-50 cursor-not-allowed'
+                                : (!isAudioMode && viewMode===mode
+                                    ? 'bg-blue-600/90 text-white border-blue-500'
+                                    : 'bg-black/60 text-gray-300 border-white/20 hover:bg-black/80')
+                            ]">{{ mode }}</button>
+                </div>
+
+                <!-- Error Message -->
+                <div v-if="videoErrorMsg" class="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-30 text-white p-6 text-center animate-fade-in">
+                    <i class="fa-solid fa-triangle-exclamation text-3xl mb-3 text-amber-500"></i>
+                    <div class="font-bold text-sm mb-1">Playback Error</div>
+                    <div class="text-[10px] text-gray-400 mb-4">{{ videoErrorMsg }}</div>
+                    <button @click="autoFixCodec" class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs transition">Try Original Source</button>
+                </div>
+
+                <!-- Audio Visualization Placeholder -->
+                <div v-if="isAudioMode" class="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                    <div class="flex flex-col items-center gap-3">
+                        <div class="flex gap-1 items-end h-16">
+                             <div class="w-2 bg-purple-500 animate-[bounce_1s_infinite] h-8"></div>
+                             <div class="w-2 bg-purple-400 animate-[bounce_1.2s_infinite] h-12"></div>
+                             <div class="w-2 bg-purple-600 animate-[bounce_0.8s_infinite] h-6"></div>
+                             <div class="w-2 bg-purple-500 animate-[bounce_1.1s_infinite] h-10"></div>
+                             <div class="w-2 bg-purple-400 animate-[bounce_0.9s_infinite] h-14"></div>
+                        </div>
+                        <span class="text-gray-400 text-xs font-mono bg-black/50 px-2 py-1 rounded">Playing Audio File</span>
+                    </div>
+                </div>
+
+                <!-- Main Player (Used for both Video and Audio) -->
+                <video ref="videoPlayer" class="w-full h-full" controls @timeupdate="onTimeUpdate" @loadedmetadata="onVideoLoaded" @error="onVideoError"></video>
+                <canvas ref="overlayCanvas" v-show="!isAudioMode"></canvas>
+            </div>
+        </footer>
+
+        <!-- Toast -->
+        <div v-if="toastMsg" class="toast animate-fade-in">
+             <i class="fa-solid fa-circle-info text-blue-400"></i>
+             <span>{{ toastMsg }}</span>
+        </div>
+
+        <!-- Run Dialog (Same as before) -->
+        <div v-if="showRunDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-2xl w-[400px] overflow-hidden transform transition-all scale-100">
+                <div class="bg-gray-50 px-5 py-3 border-b border-gray-100 flex justify-between items-center">
+                    <h3 class="font-bold text-gray-700">New Analysis Task</h3>
+                    <button @click="showRunDialog = false" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="p-5 space-y-4">
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Video Path</label><input v-model="runForm.video_rel_path" class="w-full border border-gray-300 p-2 rounded text-sm outline-none" placeholder="e.g. 后方视角/0007.mp4"></div>
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1.5">Case ID</label><input v-model="runForm.case_id" class="w-full border border-gray-300 p-2 rounded text-sm outline-none" placeholder="e.g. 007"></div>
+                </div>
+                <div class="px-5 py-3 bg-gray-50 flex justify-end gap-2 border-t border-gray-100">
+                    <button class="px-4 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-200 rounded transition" @click="showRunDialog = false">Cancel</button>
+                    <button class="px-4 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition" @click="submitRun" :disabled="running">{{ running ? 'Processing...' : 'Start Pipeline' }}</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, shallowRef, onMounted, computed, watch, nextTick } = Vue;
+
+        const CONFIG = {
+            COLORS: { 0: '#94a3b8', 1: '#3b82f6', 2: '#10b981', 3: '#f59e0b', 4: '#ef4444', 5: '#8b5cf6', 6: '#ec4899', 7:'#6366f1' },
+
+            // 统一动作映射：旧规则(stand/sit/...) + best.pt 8类(dx/dk/...)，保证颜色稳定
+            ACTION_MAP: {
+                // === 规则动作 (actions.jsonl / 旧 pipeline) ===
+                listen:0, sit:0, stand:7, bow_head:1,
+                phone:2, sleep:3, interact:4, writing:5, reading:5, lean_table:0,
+                hand_raise:6,
+
+                // === best.pt 行为检测 8 类 (case_det / *_behavior.jsonl) ===
+                dx:0, dk:1, tt:2, zt:3, js:4, zl:5, xt:6, jz:7
+            }
+        };
+
+        // 后端给 action_id 就用；没有就用前端兜底
+        const getActionId = (label, providedId=null) => {
+            if (Number.isFinite(providedId) && providedId !== null && providedId !== undefined) return Number(providedId);
+            return (label && (label in CONFIG.ACTION_MAP)) ? CONFIG.ACTION_MAP[label] : 0;
+        };
+
+        const getApiBaseUrl = () => {
+            const proto = window.location.protocol;
+            if (proto === 'file:' || proto === 'blob:' || window.location.hostname === '') return 'http://127.0.0.1:8000';
+            return '';
+        };
+
+        const API_BASE = getApiBaseUrl();
+
+        const joinBase = (base, path) => {
+            if (!path) return '';
+            if (/^https?:\/\//i.test(path)) return path;
+            if (!base) return path;
+            const b = base.replace(/\/$/, '');
+            const p = path.startsWith('/') ? path : `/${path}`;
+            return `${b}${p}`;
+        };
+
+        createApp({
+            setup() {
+                // 1. Refs
+                const loading = ref(true);
+                const casesByView = ref({});
+                const totalCases = ref(0);
+                const currentCase = ref(null);
+                const currentCaseSummary = ref(null);
+                const timelineData = shallowRef([]);
+                const transcriptData = shallowRef([]);
+                const projectionData = shallowRef([]);
+                const tracksData = shallowRef({});
+                const filesList = shallowRef([]);
+                const summaryData = shallowRef(null);
+                const mediaDebug = ref(null);
+
+                const videoPlayer = ref(null);
+                const overlayCanvas = ref(null);
+                const viewMode = ref('final');
+                const isAudioMode = ref(false);
+                const currentPlayingFile = ref("");
+
+                const currentTime = ref(0);
+                const videoDuration = ref(0);
+                const selectedTrackId = ref(null);
+                const statsTab = ref('gantt');
+                const infoTab = ref('transcript');
+                const projectionMethod = ref('pca');
+                const showRunDialog = ref(false);
+                const runForm = ref({ video_rel_path: '后方视角/0006.mp4', case_id: 'test_01' });
+                const running = ref(false);
+                const connectionError = ref(false);
+
+                const projectionContainer = ref(null);
+                const ganttContainer = ref(null);
+                const parcoordsContainer = ref(null);
+
+                const videoErrorMsg = ref("");
+                const toastMsg = ref("");
+                const codecIssueDetected = ref(false);
+                const badCodecUrls = new Set();
+                const currentVideoUrl = ref("");
+
+                const currentMediaUrls = ref({ final: null, pose: null, original: null });
+
+                // 2. Computed
+                const apiStatus = computed(() => {
+                    if (connectionError.value) return { text: 'Offline (Demo Mode)', color: 'bg-red-400' };
+                    return loading.value ? { text: 'Connecting...', color: 'bg-yellow-400' } : totalCases.value > 0 ? { text: 'Online', color: 'bg-emerald-500' } : { text: 'No Data', color: 'bg-gray-400' };
+                });
+
+                const currentTotalFrames = computed(() => {
+                    const fromSummary = currentCaseSummary.value?.frames;
+                    if (Number.isFinite(fromSummary) && fromSummary > 0) return fromSummary;
+                    // FIX 4.6: Dynamic FPS for total frames calculation
+                    const fps = currentCase.value?.fps || 25;
+                    return videoDuration.value > 0 ? Math.floor(videoDuration.value * fps) : 1800;
+                });
+
+                const activeTranscript = computed(() => transcriptData.value.filter(item => currentTime.value >= item.start && currentTime.value <= item.end + 1.0));
+
+                const ganttCursorLeft = computed(() => {
+                    if (!ganttContainer.value) return 0;
+                    const total = currentTotalFrames.value;
+                    const fps = currentCaseSummary.value?.fps || 25;
+                    const currentFrame = currentTime.value * fps;
+                    return (currentFrame / Math.max(1, total)) * ganttContainer.value.clientWidth;
+                });
+
+                const insightData = computed(() => {
+                    if (selectedTrackId.value === null) return {};
+                    const acts = timelineData.value.filter(d => d.track_id === selectedTrackId.value);
+                    if (!acts.length) return { mood: 'Unknown', moodColor: 'bg-gray-400', topActions: {} };
+                    const counts = {}; acts.forEach(d => counts[d.action] = (counts[d.action] || 0) + 1);
+                    const topActions = {}; Object.keys(counts).forEach(k => { topActions[k] = Math.round((counts[k] / acts.length) * 100); });
+                    let mood = 'Neutral', color = 'bg-gray-500';
+                    if (topActions['hand_raise'] > 5) { mood = 'Participating'; color = 'bg-emerald-500'; }
+                    else if ((topActions['reading'] || 0) + (topActions['writing'] || 0) > 40) { mood = 'Focused'; color = 'bg-blue-500'; }
+                    return { mood, moodColor: color, topActions };
+                });
+
+                // 3. Methods
+                const showToast = (msg, duration = 4000) => {
+                    toastMsg.value = msg;
+                    setTimeout(() => { if (toastMsg.value === msg) toastMsg.value = ""; }, duration);
+                };
+
+                const formatSize = (bytes) => {
+                    if (bytes === 0) return '0 B';
+                    const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+                };
+
+                const syntaxHighlight = (json) => {
+                    if (typeof json != 'string') json = JSON.stringify(json, undefined, 2);
+                    json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+                        var cls = 'json-number';
+                        if (/^"/.test(match)) {
+                            if (/:$/.test(match)) cls = 'json-key';
+                            else cls = 'json-string';
+                        } else if (/true|false/.test(match)) cls = 'json-boolean';
+                        else if (/null/.test(match)) cls = 'json-null';
+                        return '<span class="' + cls + '">' + match + '</span>';
+                    });
+                };
+
+                // Helper to construct API calls with view parameter
+                const apiCall = (endpoint, id, view) => {
+                    const url = new URL(`${API_BASE}${endpoint}/${encodeURIComponent(id)}`);
+                    if (view) url.searchParams.append('view', view);
+                    return url.toString();
+                };
+
+                // 输出目录 URL：/output/{view}/{case_dir}/{file}
+                const buildOutputUrl = (relativePath, filename) => {
+                    const parts = (relativePath || '').split('/').filter(Boolean).map(encodeURIComponent);
+                    const relSafe = parts.join('/');
+                    return `/output/${relSafe}/${encodeURIComponent(filename)}`;
+                };
+
+                // Fix: Construct file URL correctly using view and ID
+                const getFileUrl = (filename) => {
+                    if (!currentCase.value) return '';
+                    const relativePath = currentCase.value.path || `${currentCase.value.view}/${currentCase.value.id}`;
+                    const u = buildOutputUrl(relativePath, filename);
+                    return joinBase(API_BASE, u);
+                };
+
+                const playMediaFile = (filename, type) => {
+                    if (!videoPlayer.value) return;
+                    const url = getFileUrl(filename);
+                    videoPlayer.value.src = url;
+
+                    if (type === 'audio') {
+                        isAudioMode.value = true;
+                        videoPlayer.value.play().catch(e => console.log(e));
+                    } else {
+                        isAudioMode.value = false;
+                        videoPlayer.value.play().catch(e => console.log(e));
+                    }
+                    currentPlayingFile.value = filename;
+                    videoErrorMsg.value = "";
+                };
+
+                const updateVideoSource = async () => {
+                    if (!videoPlayer.value || !currentCase.value) return;
+                    videoErrorMsg.value = "";
+                    isAudioMode.value = false;
+
+                    try {
+                        const cid = currentCase.value.id;
+                        const view = currentCase.value.view;
+                        const relativePath = currentCase.value.path || `${view}/${cid}`;
+
+                        // 1) 取后端 media (original/final)
+                        const res = await fetch(apiCall('/api/media', cid, view));
+                        if (!res.ok) throw new Error();
+                        const m = await res.json();
+                        mediaDebug.value = m.debug || null;
+
+                        // 2) 用 filesList 补齐 pose / behavior overlay
+                        let poseFile = null;
+                        let behaviorFile = null;
+                        if (Array.isArray(filesList.value)) {
+                            poseFile = filesList.value.find(x => x?.name && x.name.endsWith('_overlay.mp4') && !x.name.includes('behavior_overlay'))?.name || null;
+                            behaviorFile = filesList.value.find(x => x?.name && x.name.endsWith('_behavior_overlay.mp4'))?.name || null;
+                        }
+
+                        const finalUrl = m.final_url || (behaviorFile ? buildOutputUrl(relativePath, behaviorFile) : null);
+                        const poseUrl = poseFile ? buildOutputUrl(relativePath, poseFile) : null;
+                        const originalUrl = m.original_url || null;
+
+                        currentMediaUrls.value = { final: finalUrl, pose: poseUrl, original: originalUrl };
+
+                        // 3) 选源
+                        let pick = null;
+                        if (viewMode.value === 'pose') pick = poseUrl;
+                        if (viewMode.value === 'final') pick = finalUrl;
+                        if (viewMode.value === 'original') pick = originalUrl;
+                        if (!pick) pick = finalUrl || poseUrl || originalUrl;
+
+                        // 4) 避免已知 bad codec
+                        const fullPick = joinBase(API_BASE, pick);
+                        if (viewMode.value === 'final' && fullPick && badCodecUrls.has(new URL(fullPick, window.location.href).href)) {
+                            pick = originalUrl;
+                            viewMode.value = 'original';
+                            showToast("自动切换至兼容视图 (ORIGINAL)");
+                        }
+
+                        const full = joinBase(API_BASE, pick);
+                        if (!full) {
+                            videoErrorMsg.value = "未找到视频资源。";
+                            return;
+                        }
+
+                        const fullHref = new URL(full, window.location.href).href;
+                        if (videoPlayer.value.src !== fullHref) {
+                            videoPlayer.value.src = full;
+                            videoPlayer.value.load();
+                            currentPlayingFile.value = (pick || '').split('/').pop() || '';
+                            currentVideoUrl.value = full;
+                        }
+                    } catch (e) {
+                        videoErrorMsg.value = "无法解析视频路径。";
+                    }
+                };
+
+                const autoFixCodec = () => {
+                    viewMode.value = 'original';
+                    updateVideoSource();
+                    infoTab.value = 'codec';
+                };
+
+                const onVideoError = (e) => {
+                    if (!e.target || !e.target.src) return;
+                    const err = e.target.error;
+                    if (!err) return;
+                    const src = e.target.src;
+                    badCodecUrls.add(src);
+
+                    if (src === window.location.href) return;
+
+                    console.warn(`[Video Error] Code: ${err.code} | Src: ${src}`);
+                    if ((err.code === 3 || err.code === 4) && viewMode.value === 'final' && !isAudioMode.value) {
+                        showToast("视频编码不兼容，自动切换至原始视频。", 3000);
+                        codecIssueDetected.value = true;
+                        viewMode.value = 'original';
+                        updateVideoSource();
+                        return;
+                    }
+                    videoErrorMsg.value = `Error Code: ${err.code} (Codec/Network)`;
+                };
+
+                const changeViewMode = (m) => { viewMode.value = m; updateVideoSource(); };
+
+                const loadProjection = async () => {
+                     if (!currentCase.value || connectionError.value) return;
+                     try {
+                         const cid = currentCase.value.id;
+                         const view = currentCase.value.view;
+                         const res = await fetch(`${apiCall('/api/projection', cid, view)}&method=${projectionMethod.value}`);
+                         if (res.ok) { projectionData.value = (await res.json()).points || []; renderProjection(); }
+                     } catch(e){}
+                };
+
+                const normalizeTracks = (t) => {
+                    if (!t) return {};
+                    if (Array.isArray(t)) {
+                        const m = {};
+                        t.forEach(row => {
+                            const f = row.frame_idx ?? row.frame;
+                            if (f === null || f === undefined) return;
+                            m[String(Number(f))] = row.persons || row.tracks || row.objects || [];
+                        });
+                        return m;
+                    }
+                    if (t.frames) return t.frames;
+                    if (t.data) return t.data;
+                    return t;
+                };
+
+                const loadCase = async (c) => {
+                    currentCase.value = c;
+                    selectedTrackId.value = null;
+                    infoTab.value = 'transcript';
+                    currentTime.value = 0;
+                    videoErrorMsg.value = "";
+
+                    currentCaseSummary.value = null;
+                    filesList.value = [];
+                    summaryData.value = null;
+                    mediaDebug.value = null;
+                    currentMediaUrls.value = { final: null, pose: null, original: null };
+
+                    if (connectionError.value) {
+                         projectionData.value = Array.from({length: 15}, (_, i) => ({ track_id: i + 1, x: 0.5, y: 0.5 }));
+                         nextTick(() => { renderProjection(); });
+                         return;
+                    }
+
+                    try {
+                        const cid = c.id;
+                        const view = c.view;
+
+                        // Parallel Fetch with VIEW parameter
+                        const [tlRes, trRes, projRes, trackRes, filesRes, summaryRes, actRes] = await Promise.all([
+                            fetch(apiCall('/api/timeline', cid, view)),
+                            fetch(apiCall('/api/transcript', cid, view)),
+                            fetch(apiCall('/api/projection', cid, view)),
+                            fetch(apiCall('/api/tracks', cid, view)),
+                            fetch(apiCall('/api/files', cid, view)),
+                            fetch(apiCall('/api/summary', cid, view)),
+                            fetch(apiCall('/api/actions', cid, view))
+                        ]);
+
+                        if (summaryRes.ok) {
+                            const s = await summaryRes.json();
+                            summaryData.value = s.raw || s;
+                            currentCaseSummary.value = s;
+                        }
+
+                        if (filesRes.ok) {
+                            filesList.value = await filesRes.json();
+                        }
+
+                        // FIX 4.6: Dynamic FPS (Priority: Summary > Case Info > Default 25)
+                        const fpsUse = Number(currentCaseSummary.value?.fps || currentCase.value?.fps || 25);
+
+                        // Timeline Strategy: timeline_viz (推荐) > actions_fallback
+                        let processedTimeline = [];
+
+                        if (tlRes.ok) {
+                            const tl = await tlRes.json();
+                            const items = Array.isArray(tl?.items) ? tl.items : [];
+                            processedTimeline = items.map(it => {
+                                const action = (it.action ?? it.content ?? it.label ?? '').toString();
+                                const start = Number(it.start ?? (Number(it.start_frame)/fpsUse) ?? 0);
+                                const end = Number(it.end ?? (Number(it.end_frame)/fpsUse) ?? start);
+                                const sf = Number.isFinite(it.start_frame) ? Number(it.start_frame) : Math.round(start * fpsUse);
+                                const ef = Number.isFinite(it.end_frame) ? Number(it.end_frame) : Math.round(end * fpsUse);
+                                const frameIdx = Number.isFinite(it.frame_idx) ? Number(it.frame_idx) : sf;
+                                const tid = Number(it.track_id ?? 0);
+                                return {
+                                    track_id: tid,
+                                    action,
+                                    action_id: getActionId(action, it.action_id),
+                                    start,
+                                    end,
+                                    start_frame: sf,
+                                    end_frame: ef,
+                                    frame_idx: frameIdx
+                                };
+                            }).filter(d => d.action && Number.isFinite(d.start_frame) && Number.isFinite(d.end_frame));
+                        }
+
+                        if (processedTimeline.length === 0 && actRes.ok) {
+                            const raw = await actRes.json();
+                            const rawArr = Array.isArray(raw) ? raw : (raw?.events || []);
+
+                            const rawEvents = (rawArr || []).map(d => ({
+                                track_id: Number(d.track_id ?? 0),
+                                action: (d.action ?? d.label ?? d.content ?? 'unknown').toString(),
+                                frame_idx: Number(d.frame_idx ?? d.frame ?? 0)
+                            })).filter(d => Number.isFinite(d.track_id) && Number.isFinite(d.frame_idx) && d.action);
+
+                            const byTrack = {};
+                            rawEvents.forEach(e => {
+                                if (!byTrack[e.track_id]) byTrack[e.track_id] = [];
+                                byTrack[e.track_id].push(e);
+                            });
+
+                            Object.keys(byTrack).forEach(tidStr => {
+                                const tid = Number(tidStr);
+                                const events = byTrack[tid].sort((a,b)=>a.frame_idx-b.frame_idx);
+                                if (!events.length) return;
+                                let curr = events[0];
+                                let startF = curr.frame_idx;
+                                let lastF = startF;
+
+                                for (let i=1;i<events.length;i++) {
+                                    const next = events[i];
+                                    if (next.action !== curr.action || (next.frame_idx - lastF > 5)) {
+                                        processedTimeline.push({
+                                            track_id: tid,
+                                            action: curr.action,
+                                            action_id: getActionId(curr.action),
+                                            start_frame: startF,
+                                            end_frame: lastF,
+                                            frame_idx: startF,
+                                            start: startF / fpsUse,
+                                            end: lastF / fpsUse
+                                        });
+                                        curr = next;
+                                        startF = next.frame_idx;
+                                    }
+                                    lastF = next.frame_idx;
+                                }
+
+                                processedTimeline.push({
+                                    track_id: tid,
+                                    action: curr.action,
+                                    action_id: getActionId(curr.action),
+                                    start_frame: startF,
+                                    end_frame: lastF,
+                                    frame_idx: startF,
+                                    start: startF / fpsUse,
+                                    end: lastF / fpsUse
+                                });
+                            });
+                        }
+
+                        timelineData.value = processedTimeline;
+
+                        if (trRes.ok) transcriptData.value = await trRes.json();
+                        if (projRes.ok) projectionData.value = (await projRes.json()).points || [];
+                        if (trackRes.ok) tracksData.value = normalizeTracks(await trackRes.json());
+
+                        await nextTick();
+                        updateVideoSource();
+
+                        nextTick(() => {
+                            renderProjection();
+                            if (statsTab.value === 'gantt') renderGantt();
+                            if (statsTab.value === 'features') renderParCoords();
+                        });
+                    } catch (e) {
+                        connectionError.value = true;
+                        console.error(e);
+                    }
+                };
+
+                const loadIndex = async () => {
+                    loading.value = true;
+                    connectionError.value = false;
+                    try {
+                        let res = await fetch(`${API_BASE}/api/list_cases`);
+                        if (!res.ok) throw new Error();
+                        const list = await res.json();
+                        const groups = {};
+                        list.forEach(c => {
+                            if (!groups[c.view]) groups[c.view] = [];
+                            groups[c.view].push(c);
+                        });
+                        casesByView.value = groups;
+                        totalCases.value = list.length;
+                        if (Object.keys(groups).length) loadCase(groups[Object.keys(groups)[0]][0]);
+                    } catch (e) {
+                        connectionError.value = true;
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const renderProjection = () => {
+                    const el = d3.select('#projection-svg');
+                    el.selectAll('*').remove();
+                    if (!projectionContainer.value || !projectionData.value.length) return;
+
+                    const { width, height } = projectionContainer.value.getBoundingClientRect();
+                    const padding = 30;
+                    const xScale = d3.scaleLinear().domain([0, 1]).range([padding, width - padding]);
+                    const yScale = d3.scaleLinear().domain([0, 1]).range([height - padding, padding]);
+
+                    el.append('g').selectAll('circle').data(projectionData.value).enter().append('circle')
+                        .attr('cx', d => xScale(d.x)).attr('cy', d => yScale(d.y)).attr('r', d => d.track_id === selectedTrackId.value ? 8 : 4)
+                        .attr('fill', d => d.track_id === selectedTrackId.value ? '#ef4444' : '#3b82f6')
+                        .attr('stroke', 'white').attr('stroke-width', 2)
+                        .attr('opacity', 0.8).style('cursor', 'pointer')
+                        .on('click', (e, d) => { selectedTrackId.value = d.track_id; renderProjection(); renderGantt(); renderParCoords(); })
+                        .append('title').text(d => `ID: ${d.track_id}`);
+                };
+
+                const renderGantt = () => {
+                    const el = d3.select('#gantt-svg');
+                    el.selectAll('*').remove();
+                    if (!ganttContainer.value || !timelineData.value.length) return;
+
+                    const { width, height } = ganttContainer.value.getBoundingClientRect();
+
+                    // FIX 4.5: Correct syntax [...new Set]
+                    const trackIds = [...new Set(timelineData.value.map(d => d.track_id))].sort((a,b)=>a-b);
+                    const totalFrames = currentTotalFrames.value;
+
+                    const xScale = d3.scaleLinear().domain([0, totalFrames]).range([0, width]);
+                    const yScale = d3.scaleBand().domain(trackIds).range([10, height-10]).padding(0.2);
+
+                    const validData = timelineData.value.filter(d => Number.isFinite(d.start_frame) && Number.isFinite(d.end_frame));
+
+                    el.append('g').selectAll('rect').data(validData).enter().append('rect')
+                        .attr('x', d => xScale(d.start_frame)).attr('y', d => yScale(d.track_id))
+                        .attr('width', d => {
+                            const w = xScale(d.end_frame) - xScale(d.start_frame);
+                            return (Number.isFinite(w) && w >= 0) ? Math.max(2, w) : 0;
+                        })
+                        .attr('height', yScale.bandwidth())
+                        .attr('fill', d => CONFIG.COLORS[d.action_id] || '#ccc')
+                        .attr('opacity', d => (selectedTrackId.value === null || d.track_id === selectedTrackId.value) ? 1 : 0.1)
+                        .on('click', (e, d) => {
+                             // FIX 4.6: Dynamic FPS for jump
+                             const fps = Number(currentCaseSummary.value?.fps || currentCase.value?.fps || 25);
+                             const f = Number(d.frame_idx);
+                             if (videoPlayer.value && Number.isFinite(f) && fps > 0) videoPlayer.value.currentTime = f / fps;
+                        });
+                };
+
+                const renderParCoords = () => {
+                    const el = d3.select('#parcoords-svg');
+                    el.selectAll('*').remove();
+                    if (!parcoordsContainer.value || !timelineData.value.length) return;
+
+                    const { width, height } = parcoordsContainer.value.getBoundingClientRect();
+                    const stats = {};
+
+                    timelineData.value.forEach(d => {
+                        if (!stats[d.track_id]) stats[d.track_id] = { id: d.track_id, total:0, focus:0, interact:0, active:0 };
+                        const dur = (d.end_frame - d.start_frame) || 1;
+                        stats[d.track_id].total += dur;
+                        const actId = d.action_id;
+                        if ([0, 5].includes(actId)) stats[d.track_id].focus += dur;
+                        if ([4, 6, 7].includes(actId)) stats[d.track_id].interact += dur;
+                        if (![0, 1, 3].includes(actId)) stats[d.track_id].active += dur;
+                    });
+
+                    const data = Object.values(stats).map(s => ({
+                        id: s.id,
+                        Focus: s.total ? s.focus/s.total : 0,
+                        Interact: s.total ? s.interact/s.total : 0,
+                        Active: s.total ? s.active/s.total : 0
+                    }));
+                    if (data.length === 0) return;
+
+                    const dims = ['Focus', 'Interact', 'Active'];
+                    const padding = 20;
+                    const x = d3.scalePoint().range([padding, width-padding]).padding(0.5).domain(dims);
+                    const y = {};
+                    dims.forEach(d => y[d] = d3.scaleLinear().domain([0, 1]).range([height-padding, padding]));
+
+                    const line = d3.line().x(d => x(d[0])).y(d => y[d[0]](d[1]));
+
+                    el.selectAll('path').data(data).enter().append('path').attr('class', 'pc-line')
+                        .attr('d', d => line(dims.map(p => [p, d[p]])))
+                        .style('stroke', d => d.id===selectedTrackId.value ? 'var(--selection)' : 'var(--accent)')
+                        .style('stroke-width', d => d.id===selectedTrackId.value ? 2 : 1)
+                        .style('opacity', d => selectedTrackId.value && d.id!==selectedTrackId.value ? 0.1 : 0.6);
+
+                    dims.forEach(d => {
+                        const axis = el.append('g').attr('transform', `translate(${x(d)})`);
+                        axis.call(d3.axisLeft(y[d]).ticks(5).tickSize(-4));
+                        axis.append('text').attr('y', height-5).text(d).attr('fill', '#666').attr('font-size', '10px').attr('text-anchor', 'middle');
+                    });
+                };
+
+                const onVideoLoaded = () => { if (videoPlayer.value) videoDuration.value = videoPlayer.value.duration; };
+
+                const onTimeUpdate = () => {
+                    if (!videoPlayer.value) return;
+                    currentTime.value = videoPlayer.value.currentTime;
+                    drawOverlay();
+                };
+
+                const drawOverlay = () => {
+                    if (!videoPlayer.value || !overlayCanvas.value) return;
+                    const ctx = overlayCanvas.value.getContext('2d');
+                    const vid = videoPlayer.value;
+
+                    if (overlayCanvas.value.width !== vid.clientWidth || overlayCanvas.value.height !== vid.clientHeight) {
+                        overlayCanvas.value.width = vid.clientWidth;
+                        overlayCanvas.value.height = vid.clientHeight;
+                    }
+
+                    ctx.clearRect(0, 0, overlayCanvas.value.width, overlayCanvas.value.height);
+
+                    const fps = Number(currentCaseSummary.value?.fps || 25);
+                    const frame = Math.round(vid.currentTime * fps);
+
+                    const objs = tracksData.value[String(frame)] || [];
+                    if (!objs || !objs.length) return;
+
+                    const metaW = vid.videoWidth || currentCaseSummary.value?.width || currentCaseSummary.value?.video?.width || 1280;
+                    const metaH = vid.videoHeight || currentCaseSummary.value?.height || currentCaseSummary.value?.video?.height || 720;
+                    const scaleX = vid.clientWidth / metaW;
+                    const scaleY = vid.clientHeight / metaH;
+
+                    objs.forEach(obj => {
+                        const id = obj.id ?? obj.track_id ?? obj.tid;
+                        const bb = obj.box || obj.bbox || obj.xyxy;
+                        if (!bb || bb.length < 4) return;
+
+                        const x1 = Number(bb[0]), y1 = Number(bb[1]), x2 = Number(bb[2]), y2 = Number(bb[3]);
+                        if (![x1,y1,x2,y2].every(Number.isFinite)) return;
+
+                        const sel = (selectedTrackId.value !== null) && (Number(id) === Number(selectedTrackId.value));
+                        const hid = selectedTrackId.value !== null && !sel;
+
+                        ctx.globalAlpha = hid ? 0.1 : 1.0;
+                        ctx.strokeStyle = sel ? '#ef4444' : '#3b82f6';
+                        ctx.lineWidth = sel ? 3 : 2;
+
+                        ctx.strokeRect(x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY);
+
+                        if (!hid) {
+                            ctx.fillStyle = sel ? '#ef4444' : '#3b82f6';
+                            ctx.font = 'bold 12px Arial';
+                            ctx.fillText(obj.label || obj.action || `ID:${id}`, x1 * scaleX, Math.max(14, y1 * scaleY - 5));
+                        }
+                    });
+                };
+
+                const submitRun = async () => {
+                    if (connectionError.value) return;
+                    running.value = true;
+                    try {
+                        const res = await fetch(`${API_BASE}/api/run_analysis`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(runForm.value)
+                        });
+                        if (res.ok) {
+                            alert('Analysis Started!');
+                            setTimeout(loadIndex, 3000);
+                            showRunDialog.value = false;
+                        }
+                    } finally {
+                        running.value = false;
+                    }
+                };
+
+                watch(selectedTrackId, (nv) => { if (nv !== null) infoTab.value = 'student'; });
+
+                onMounted(() => {
+                    loadIndex();
+                    const loop = () => { drawOverlay(); requestAnimationFrame(loop); };
+                    loop();
+                    window.addEventListener('resize', () => {
+                        renderProjection();
+                        if (statsTab.value === 'gantt') renderGantt();
+                    });
+                });
+
+                watch(statsTab, (n) => {
+                    nextTick(() => {
+                        if (n === 'gantt') renderGantt();
+                        if (n === 'features') renderParCoords();
+                    });
+                });
+
+                return {
+                    loading, apiStatus, casesByView, totalCases, currentCase, loadCase,
+                    changeViewMode, viewMode,
+                    videoPlayer, overlayCanvas,
+                    projectionContainer, ganttContainer, parcoordsContainer,
+                    activeTranscript, currentTime, ganttCursorLeft,
+                    selectedTrackId, insightData,
+                    projectionData, projectionMethod, loadProjection,
+                    showRunDialog, runForm, running, submitRun,
+                    statsTab, onTimeUpdate, onVideoLoaded,
+                    connectionError,
+                    infoTab,
+                    onVideoError,
+                    videoErrorMsg,
+                    codecIssueDetected,
+                    autoFixCodec,
+                    toastMsg,
+                    filesList,
+                    summaryData,
+                    formatSize,
+                    getFileUrl,
+                    playMediaFile,
+                    isAudioMode,
+                    mediaDebug,
+                    syntaxHighlight,
+                    currentPlayingFile,
+                    currentVideoUrl,
+                    currentMediaUrls
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
