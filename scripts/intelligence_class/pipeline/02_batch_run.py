@@ -197,6 +197,7 @@ def main():
 
     parser.add_argument("--skip_existing", type=int, default=1, help="跳过已完成 (1=Yes, 0=No)")
     parser.add_argument("--min_bytes", type=int, default=256, help="判定完成的 actions.jsonl 最小字节数阈值")
+    parser.add_argument("--short_video", type=int, default=0, help="短视频模式：降低 min_bytes 与轨迹门槛")
     parser.add_argument("--migrate_legacy", type=int, default=0,
                         help="发现旧结构已完成时，是否自动搬迁到新结构 (1=Yes,0=No)")
     parser.add_argument("--dry_run", action="store_true", help="仅打印计划，不执行")
@@ -207,6 +208,9 @@ def main():
 
     paths = resolve_paths(args.index, args.out_root)
     python_exe = sys.executable
+    log_dir = paths["batch_dir"] / "logs"
+    if int(args.short_video) == 1 and args.min_bytes == 256:
+        args.min_bytes = 128
 
     print("=" * 60)
     print("🚀 批处理调度器启动 (Batch Scheduler)")
@@ -344,6 +348,8 @@ def main():
             "--video_id", str(video_id),
             "--out_dir", str(out_dir_new),
         ]
+        if int(args.short_video) == 1:
+            cmd += ["--short_video", "1"]
 
         if args.dry_run:
             print(f"{prefix} [DRY-RUN] CMD: {' '.join(cmd)}")
@@ -354,19 +360,20 @@ def main():
         loop_start = time.time()
         try:
             if args.stream_output == 1:
-                subprocess.run(
-                    cmd,
-                    check=True,
-                )
+                subprocess.run(cmd, check=True)
             else:
-                subprocess.run(
-                    cmd,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_path = log_dir / f"{video_id}.log"
+                with log_path.open("w", encoding="utf-8") as f:
+                    subprocess.run(
+                        cmd,
+                        check=True,
+                        stdout=f,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
 
             duration = time.time() - loop_start
             print(f"{prefix} SUCCESS ({duration:.1f}s)")
