@@ -12,12 +12,15 @@
 from pathlib import Path
 from datetime import datetime
 
+from scripts.intelligence_class._utils.pathing import find_project_root
+
 # =========================
 # 1. 路径配置
 # =========================
 # 向上两级，定位到 intelligence_class 根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR = Path(r"C:\Users\Lenovo\Desktop\yolo")
+ROOT_DIR = find_project_root(Path(__file__).resolve())
+OUTPUT_DIR = ROOT_DIR / "output" / "_code_dump"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # =========================
