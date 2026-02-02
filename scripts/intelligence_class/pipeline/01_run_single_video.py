@@ -381,6 +381,8 @@ def export_bundles(
     export_behavior: bool,
     make_overlays: bool,
     view_name: Optional[str] = None,
+    pose_model: Optional[str] = None,
+    case_det_model: Optional[str] = None,
 ) -> None:
     fps_use, n_frames, w, h = get_video_info(video_path, fps_fallback)
 
@@ -406,6 +408,8 @@ def export_bundles(
                 "frames": n_frames,
                 "labels": CASE_NAMES,
                 "source_case_det": str(case_det_jsonl),
+                "pose_model": pose_model,
+                "case_det_model": case_det_model,
                 "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             },
             dry_run=dry_run,
@@ -427,6 +431,8 @@ def export_bundles(
                 "width": w,
                 "height": h,
                 "source_tracks": str(tracks_jsonl),
+                "pose_model": pose_model,
+                "case_det_model": case_det_model,
                 "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             },
             dry_run=dry_run,
@@ -659,6 +665,8 @@ def run_single_video(
         export_behavior=bool(int(export_behavior)),
         make_overlays=bool(int(make_overlays)),
         view_name=view_name,
+        pose_model=str(pose_model) if pose_model else None,
+        case_det_model=str(case_det_model) if case_det_model else None,
     )
 
     # ========= Step 5: Align =========
