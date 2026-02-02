@@ -81,15 +81,22 @@ def load_tracks(path, fps=25.0):
                 })
     return tracks
 
-def detect_actions(tracks, fps=25.0):
+def detect_actions(
+    tracks,
+    fps=25.0,
+    raise_hand_sec: float = 0.5,
+    head_down_sec: float = 0.7,
+    stand_sec: float = 0.7,
+    min_track_frames: int = 30,
+):
     events = []
 
-    raise_hand_frames = int(0.5 * fps)   # ≥0.5s
-    head_down_frames  = int(0.7 * fps)   # ≥0.7s
-    stand_frames      = int(0.7 * fps)
+    raise_hand_frames = max(1, int(raise_hand_sec * fps))   # ≥0.5s
+    head_down_frames = max(1, int(head_down_sec * fps))     # ≥0.7s
+    stand_frames = max(1, int(stand_sec * fps))
 
     for tid, seq in tracks.items():
-        if len(seq) < 30:
+        if len(seq) < min_track_frames:
             continue
 
         heights = [(s["bbox"][3] - s["bbox"][1]) for s in seq if s.get("bbox") is not None]
@@ -203,6 +210,10 @@ def main():
     parser.add_argument("--in", dest="in_path", type=str, required=True)
     parser.add_argument("--out", dest="out_path", type=str, required=True)
     parser.add_argument("--fps", dest="fps", type=float, default=25.0)
+    parser.add_argument("--raise_hand_sec", type=float, default=0.5)
+    parser.add_argument("--head_down_sec", type=float, default=0.7)
+    parser.add_argument("--stand_sec", type=float, default=0.7)
+    parser.add_argument("--min_track_frames", type=int, default=30)
     args = parser.parse_args()
 
     in_path = args.in_path
@@ -213,7 +224,14 @@ def main():
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     tracks = load_tracks(in_path, fps=float(args.fps))
-    events = detect_actions(tracks, fps=float(args.fps))
+    events = detect_actions(
+        tracks,
+        fps=float(args.fps),
+        raise_hand_sec=float(args.raise_hand_sec),
+        head_down_sec=float(args.head_down_sec),
+        stand_sec=float(args.stand_sec),
+        min_track_frames=int(args.min_track_frames),
+    )
 
     with open(out_path, "w", encoding="utf-8") as f:
         for e in events:
