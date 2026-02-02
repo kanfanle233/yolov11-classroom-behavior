@@ -285,11 +285,28 @@ def summarize_case(
     return summary, debug
 
 
+def _pick_prefix_from_case_dir(case_dir: Path, case_id: Optional[str]) -> Optional[str]:
+    if case_id:
+        return case_id
+
+    jsonls = [p for p in case_dir.glob("*.jsonl") if "behavior" not in p.name.lower()]
+    if jsonls:
+        return sorted(jsonls, key=lambda x: x.stat().st_size, reverse=True)[0].stem
+
+    metas = list(case_dir.glob("*.meta.json"))
+    if metas:
+        return sorted(metas, key=lambda x: x.stat().st_size, reverse=True)[0].stem.replace(".meta", "")
+
+    return None
+
+
 # -------------------------
 # CLI
 # -------------------------
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--case_dir", type=str, default="", help="单个案例目录，直接生成该目录下的 summary")
+    ap.add_argument("--case_id", type=str, default="", help="案例前缀（用于 case_dir 模式）")
     ap.add_argument("--out_root", type=str, default="output/智慧课堂学生行为数据集", help="数据集输出根目录")
     ap.add_argument("--view", type=str, default="", help="只处理某个视角（可选）")
     ap.add_argument("--id", type=str, default="", help="只处理某个 case 前缀（可选，如 0001/001/1）")
@@ -298,6 +315,34 @@ def main():
     ap.add_argument("--long_empty_sec", type=float, default=None, help="seconds for LONG_EMPTY_SEGMENT flag")
     ap.add_argument("--overwrite", type=int, default=0, help="1=覆盖已有 _summary.json")
     args = ap.parse_args()
+
+    if args.case_dir:
+        case_dir = Path(args.case_dir).resolve()
+        if not case_dir.exists():
+            raise FileNotFoundError(f"Case dir not found: {case_dir}")
+
+        prefix = _pick_prefix_from_case_dir(case_dir, args.case_id.strip() or None)
+        if not prefix:
+            raise FileNotFoundError(f"No jsonl/meta found under case dir: {case_dir}")
+
+        out_path = case_dir / f"{prefix}_summary.json"
+        if out_path.exists() and not args.overwrite:
+            print(f"[SKIP] summary exists: {out_path}")
+            return
+
+        long_empty_sec = args.long_empty_sec
+        if long_empty_sec is None:
+            long_empty_sec = 1.5 if int(args.short_video) == 1 else 3.0
+        summary, _ = summarize_case(
+            view=case_dir.name,
+            view_dir=case_dir,
+            prefix=prefix,
+            max_lines=args.max_lines,
+            long_empty_sec=long_empty_sec,
+        )
+        safe_write_json(out_path, summary)
+        print(f"[DONE] case_dir summary -> {out_path}")
+        return
 
     ds_root = Path(args.out_root).resolve()
     if not ds_root.exists():

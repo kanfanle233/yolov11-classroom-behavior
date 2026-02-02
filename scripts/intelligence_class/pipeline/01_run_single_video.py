@@ -559,7 +559,7 @@ def run_single_video(
     path_case_det_jsonl = out_p / "case_det.jsonl"
 
     # Scripts
-    script_pose = scripts_dir / "02_export_keypoints_jsonl.py"
+    script_pose = pipeline_dir / "02_export_keypoints_jsonl.py"
     script_track = pipeline_dir / "03_track_and_smooth_v2.py"
     script_attach = pipeline_dir / "03b_attach_keypoints.py"
     script_actions = pipeline_dir / "04_action_rules.py"
@@ -752,8 +752,20 @@ def run_single_video(
 
     # ========= Step 6-8: Reports =========
     if int(run_summarize) == 1 and check_script_exists(script_sum):
+        cmd = [
+            python_exe,
+            str(script_sum),
+            "--case_dir",
+            str(out_p),
+            "--case_id",
+            str(case_id),
+            "--overwrite",
+            "1",
+        ]
+        if int(short_video) == 1:
+            cmd += ["--short_video", "1"]
         run_step(
-            [python_exe, str(script_sum), "--out_root", str(out_p.parent.parent), "--view", str(out_p.parent.name), "--id", str(case_id), "--overwrite", "1"],
+            cmd,
             "步骤 6: 案例报告",
             dry_run,
             log_dir_path,
