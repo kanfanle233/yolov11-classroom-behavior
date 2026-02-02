@@ -35,7 +35,12 @@ def extract_audio(video_path: Path, audio_path: Path):
     subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
 
-def run_whisper(video_path: str, out_dir: str, model_size: str = "base"):
+def run_whisper(
+    video_path: str,
+    out_dir: str,
+    model_size: str = "base",
+    skip_on_error: bool = False,
+):
     video_p = Path(video_path)
     out_p = Path(out_dir)
     out_p.mkdir(parents=True, exist_ok=True)
@@ -49,6 +54,8 @@ def run_whisper(video_path: str, out_dir: str, model_size: str = "base"):
 
     if not check_ffmpeg():
         print("[Error] ffmpeg not found. Please install ffmpeg to extract audio.")
+        if skip_on_error:
+            return
         sys.exit(1)
 
     print(f"[ASR] Extracting audio from {video_p.name}...")
@@ -63,6 +70,8 @@ def run_whisper(video_path: str, out_dir: str, model_size: str = "base"):
         import whisper
     except ImportError:
         print("[Error] 'openai-whisper' not installed. Run: pip install openai-whisper")
+        if skip_on_error:
+            return
         sys.exit(1)
 
     # 加载模型 (自动利用 GPU)
@@ -95,6 +104,7 @@ if __name__ == "__main__":
     parser.add_argument("--video", required=True)
     parser.add_argument("--out_dir", required=True)
     parser.add_argument("--model", default="base", help="tiny, base, small, medium, large")
+    parser.add_argument("--skip_on_error", action="store_true", help="skip ASR if dependencies are missing")
     args = parser.parse_args()
 
-    run_whisper(args.video, args.out_dir, args.model)
+    run_whisper(args.video, args.out_dir, args.model, args.skip_on_error)

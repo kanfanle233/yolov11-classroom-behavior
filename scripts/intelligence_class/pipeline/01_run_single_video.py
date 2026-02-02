@@ -625,7 +625,17 @@ def run_single_video(
     # ========= Step 4: ASR =========
     if int(run_asr) == 1 and check_script_exists(script_asr):
         ok, msg = run_step(
-            [python_exe, str(script_asr), "--video", str(video_p), "--out_dir", str(out_p), "--model", str(asr_model)],
+            [
+                python_exe,
+                str(script_asr),
+                "--video",
+                str(video_p),
+                "--out_dir",
+                str(out_p),
+                "--model",
+                str(asr_model),
+                "--skip_on_error",
+            ],
             "步骤 4: 语音转写",
             dry_run,
             log_dir_path,

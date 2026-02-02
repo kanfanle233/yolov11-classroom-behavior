@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import argparse
 from collections import defaultdict
 from pathlib import Path
@@ -91,9 +92,9 @@ def detect_actions(
 ):
     events = []
 
-    raise_hand_frames = max(1, int(raise_hand_sec * fps))   # ≥0.5s
-    head_down_frames = max(1, int(head_down_sec * fps))     # ≥0.7s
-    stand_frames = max(1, int(stand_sec * fps))
+    raise_hand_frames = max(1, math.ceil(raise_hand_sec * fps))   # ≥0.5s
+    head_down_frames = max(1, math.ceil(head_down_sec * fps))     # ≥0.7s
+    stand_frames = max(1, math.ceil(stand_sec * fps))
 
     for tid, seq in tracks.items():
         if len(seq) < min_track_frames:
