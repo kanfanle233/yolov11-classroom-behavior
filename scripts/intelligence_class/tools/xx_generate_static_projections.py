@@ -1,13 +1,19 @@
 import argparse
 import json
 import sys
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.manifold import MDS, TSNE
 
-from scripts.intelligence_class._utils.action_map import ALL_ACTIONS
+try:
+    from scripts.intelligence_class._utils.action_map import ALL_ACTIONS
+except ModuleNotFoundError:
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from scripts.intelligence_class._utils.action_map import ALL_ACTIONS
 
 # 尝试引入 Levenshtein
 try:
@@ -103,7 +109,15 @@ def compute_features_and_save(case_dir: Path, min_tracks: int = 2):
         print(f"  [Err] Failed {case_dir.name}: {e}")
 
 
-def main(demo_web_root: str, min_tracks: int):
+def main(demo_web_root: str, min_tracks: int, target_case: str = ""):
+    if target_case:
+        case_dir = Path(target_case)
+        if not case_dir.exists():
+            print(f"Target case not found: {case_dir}")
+            return
+        compute_features_and_save(case_dir, min_tracks=min_tracks)
+        return
+
     root = Path(demo_web_root)
     if not root.exists():
         print("Demo Web root not found")
@@ -121,6 +135,7 @@ def main(demo_web_root: str, min_tracks: int):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=str, default="", help="root with view/case folders")
+    parser.add_argument("--target_case", type=str, default="", help="single case dir to process")
     parser.add_argument("--min_tracks", type=int, default=2)
     parser.add_argument("--short_video", type=int, default=0)
     args = parser.parse_args()
@@ -132,4 +147,4 @@ if __name__ == "__main__":
     min_tracks = args.min_tracks
     if int(args.short_video) == 1 and args.min_tracks == 2:
         min_tracks = 1
-    main(root, min_tracks=min_tracks)
+    main(root, min_tracks=min_tracks, target_case=args.target_case)

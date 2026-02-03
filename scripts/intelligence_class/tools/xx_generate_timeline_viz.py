@@ -2,10 +2,16 @@
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from collections import defaultdict
 
-from scripts.intelligence_class._utils.action_map import ACTION_MAP, LABEL_NORMALIZE
+try:
+    from scripts.intelligence_class._utils.action_map import ACTION_MAP, LABEL_NORMALIZE
+except ModuleNotFoundError:
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from scripts.intelligence_class._utils.action_map import ACTION_MAP, LABEL_NORMALIZE
 
 
 def load_jsonl(path: Path):
