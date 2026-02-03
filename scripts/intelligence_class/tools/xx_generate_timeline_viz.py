@@ -1,40 +1,17 @@
 # scripts/intelligence_class/tools/xx_generate_timeline_viz.py
 import argparse
 import json
+import math
+import sys
 from pathlib import Path
 from collections import defaultdict
 
-# 行为颜色映射 (与前端保持一致，用于生成 meta 信息)
-# 注意：timeline_viz.json 里 action_id 就靠这张表给前端配色
-ACTION_MAP = {
-    "stand": 7,
-    "sit": 0,
-    "hand_raise": 6,
-    "reading": 8,
-    "writing": 5,
-    "phone": 2,
-    "sleep": 3,
-    "interact": 4,
-    "bow_head": 1,
-    "listen": 0,
-}
-
-# best.pt 8类（dx/dk/tt/zt/js/zl/xt/jz） -> 前端动作名（保持前端不改也能用）
-# 你如果想保留原始8类不映射，也可以把这里改成 action=原label
-LABEL_NORMALIZE = {
-    # 你自定义8类
-    "dx": "writing",     # 写
-    "dk": "reading",     # 读
-    "tt": "listen",      # 听
-    "zt": "bow_head",    # 低头
-    "js": "hand_raise",  # 举手
-    "zl": "stand",       # 站立
-    "xt": "interact",    # 讨论/交谈
-    "jz": "interact",    # 交头接耳/交流
-    # 兼容一些可能的英文/别名
-    "doze": "sleep",
-    "distract": "bow_head",
-}
+try:
+    from scripts.intelligence_class._utils.action_map import ACTION_MAP, LABEL_NORMALIZE
+except ModuleNotFoundError:
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from scripts.intelligence_class._utils.action_map import ACTION_MAP, LABEL_NORMALIZE
 
 
 def load_jsonl(path: Path):
@@ -115,10 +92,18 @@ def _norm_action(label: str) -> str:
     return LABEL_NORMALIZE.get(s_low, LABEL_NORMALIZE.get(s, s))
 
 
-def compress_timeline(frames_data: list, fps: float = 25.0) -> list:
+def compress_timeline(
+    frames_data: list,
+    fps: float = 25.0,
+    gap_sec: float = 0.2,
+    min_event_sec: float = 0.2,
+) -> list:
     """核心算法：将离散的帧压缩为连续的时间段 (Gantt Blocks)"""
     if not frames_data:
         return []
+
+    gap_frames = max(1, math.ceil(gap_sec * fps))
+    min_event_frames = max(1, math.ceil(min_event_sec * fps))
 
     # 1. 按 track_id 分组
     by_track = defaultdict(list)
@@ -150,16 +135,16 @@ def compress_timeline(frames_data: list, fps: float = 25.0) -> list:
                 continue
 
             is_same_action = (act == current_event["action"])
-            is_continuous = (f - current_event["end_frame"] <= 5)
+            is_continuous = (f - current_event["end_frame"] <= gap_frames)
 
             if is_same_action and is_continuous:
                 current_event["end_frame"] = f
             else:
-                if (current_event["end_frame"] - current_event["start_frame"]) > 5:
+                if (current_event["end_frame"] - current_event["start_frame"]) >= min_event_frames:
                     compressed_events.append(current_event)
                 current_event = {"track_id": tid, "action": act, "start_frame": f, "end_frame": f}
 
-        if current_event and (current_event["end_frame"] - current_event["start_frame"]) > 5:
+        if current_event and (current_event["end_frame"] - current_event["start_frame"]) >= min_event_frames:
             compressed_events.append(current_event)
 
     # 3. 格式化输出
@@ -184,6 +169,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--case_dir", required=True, help="案例输出目录, e.g. output/rear__001")
     parser.add_argument("--fps", type=float, default=25.0)
+    parser.add_argument("--short_video", type=int, default=0, help="use shorter gap/min durations for short clips")
+    parser.add_argument("--gap_sec", type=float, default=None, help="max gap (seconds) to merge actions")
+    parser.add_argument("--min_event_sec", type=float, default=None, help="min duration (seconds) to keep an event")
 
     # 新增：强制选择数据源
     # auto: 保持原逻辑（优先 actions.jsonl，找不到才用 *_behavior.jsonl）
@@ -231,7 +219,7 @@ def main():
             json.dump({"items": [], "fps": args.fps}, f)
         return
 
-    print(f"🚀 正在处理 Timeline: {source_file.name} ({source_type})")
+    print(f"[Timeline] 处理: {source_file.name} ({source_type})")
 
     # 2. 加载
     raw_data = load_jsonl(source_file)
@@ -246,10 +234,10 @@ def main():
 
         if tracks_path and tracks_path.exists():
             tracks_idx = _index_tracks_by_frame(tracks_path)
-            print(f"🧷 tracks 绑定启用: {tracks_path.name} (frames={len(tracks_idx)})")
+            print(f"[Timeline] tracks 绑定启用: {tracks_path.name} (frames={len(tracks_idx)})")
         else:
             if args.tracks:
-                print(f"⚠️  tracks 文件不存在，跳过绑定: {tracks_path}")
+                    print(f"[Timeline] tracks 文件不存在，跳过绑定: {tracks_path}")
 
         flat_data = []
         for row in raw_data:
@@ -290,7 +278,14 @@ def main():
         raw_data = flat_data
 
     # 4. 压缩生成 Gantt 数据
-    timeline_items = compress_timeline(raw_data, args.fps)
+    gap_sec = args.gap_sec
+    min_event_sec = args.min_event_sec
+    if gap_sec is None:
+        gap_sec = 0.12 if int(args.short_video) == 1 else 0.2
+    if min_event_sec is None:
+        min_event_sec = 0.12 if int(args.short_video) == 1 else 0.2
+
+    timeline_items = compress_timeline(raw_data, args.fps, gap_sec=gap_sec, min_event_sec=min_event_sec)
 
     # 5. 保存
     out_file = case_dir / "timeline_viz.json"
@@ -308,8 +303,26 @@ def main():
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(output_obj, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ 已生成 Timeline 数据: {out_file} (包含 {len(timeline_items)} 个事件)")
+    print(f"[Timeline] 已生成: {out_file} (事件数={len(timeline_items)})")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        case_dir = None
+        for i, arg in enumerate(sys.argv):
+            if arg == "--case_dir" and i + 1 < len(sys.argv):
+                case_dir = Path(sys.argv[i + 1])
+                break
+        if case_dir and case_dir.exists():
+            try:
+                fallback = {
+                    "meta": {"error": str(exc), "source": None, "source_type": None, "fps": None},
+                    "items": [],
+                }
+                with open(case_dir / "timeline_viz.json", "w", encoding="utf-8") as f:
+                    json.dump(fallback, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+        print(f"[Timeline] generation failed: {exc}")
