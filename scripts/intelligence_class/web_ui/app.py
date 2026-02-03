@@ -33,6 +33,15 @@ try:
 except ImportError:
     Levenshtein = None
 
+try:
+    from scripts.intelligence_class._utils.action_map import ACTION_MAP as COMMON_ACTION_MAP
+    from scripts.intelligence_class._utils.action_map import LABEL_NORMALIZE as COMMON_LABEL_NORMALIZE
+except ModuleNotFoundError:
+    PROJECT_ROOT_FALLBACK = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(PROJECT_ROOT_FALLBACK))
+    from scripts.intelligence_class._utils.action_map import ACTION_MAP as COMMON_ACTION_MAP
+    from scripts.intelligence_class._utils.action_map import LABEL_NORMALIZE as COMMON_LABEL_NORMALIZE
+
 
 # ================================
 # 0) 全局配置
@@ -236,15 +245,8 @@ def _ffprobe_duration_fps(path: Path) -> dict:
 # 2) Timeline 读取/兜底生成
 # ================================
 
-ACTION_MAP = {
-    "stand": 7, "sit": 0, "hand_raise": 6, "reading": 8, "writing": 5,
-    "phone": 2, "sleep": 3, "interact": 4, "bow_head": 1, "listen": 0,
-}
-
-BEHAVIOR_TO_ACTION = {
-    "dx": "writing", "dk": "reading", "tt": "listen", "zt": "interact",
-    "js": "hand_raise", "zl": "stand", "xt": "interact", "jz": "interact",
-}
+ACTION_MAP = COMMON_ACTION_MAP
+LABEL_NORMALIZE = COMMON_LABEL_NORMALIZE
 
 
 def _normalize_action(label: str) -> str:
@@ -253,8 +255,8 @@ def _normalize_action(label: str) -> str:
     label = str(label).strip()
     if label in ACTION_MAP:
         return label
-    if label in BEHAVIOR_TO_ACTION:
-        return BEHAVIOR_TO_ACTION[label]
+    if label in LABEL_NORMALIZE:
+        return LABEL_NORMALIZE[label]
     alias = {
         "认真听讲": "listen", "听讲": "listen", "做笔记": "writing", "写字": "writing",
         "看书": "reading", "玩手机": "phone", "打瞌睡": "sleep", "交头接耳": "interact",
@@ -342,7 +344,7 @@ def compress_timeline(frames_data: List[Dict[str, Any]], fps: float = 25.0) -> L
             tid_int = int(tid)
         except Exception:
             continue
-        if tid_int <= 0:
+        if tid_int < 0:
             continue
         act_norm = _normalize_action(str(action))
         by_track[tid_int].append({"frame": int(fidx), "action": act_norm})
@@ -477,7 +479,7 @@ def _build_timeline_viz(case_dir: Path) -> Dict[str, Any]:
                     if bb is not None and persons:
                         tid = _match_track_id(bb, persons, iou_thr=0.30)
                 if tid is None:
-                    continue
+                    tid = 0
                 flat.append({"frame_idx": fidx, "track_id": int(tid), "action": act})
         elif "persons" in row:
             for p in row.get("persons", []) or []:
