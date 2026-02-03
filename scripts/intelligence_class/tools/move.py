@@ -1,11 +1,12 @@
-import os
 import shutil
 from pathlib import Path
+
+from scripts.intelligence_class._utils.pathing import find_project_root
 
 # 1. 动态获取项目 output 目录
 # 假设本脚本在 .../scripts/intelligence_class/tools/move.py
 current_file = Path(__file__).resolve()
-project_root = current_file.parents[3]
+project_root = find_project_root(current_file)
 base_path = project_root / "output"
 
 # 2. 定义需要分类的前缀及其对应的目标文件夹名
