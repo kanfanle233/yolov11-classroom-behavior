@@ -386,14 +386,26 @@ fourcc = cv2.VideoWriter_fourcc(*'avc1')
         const { createApp, ref, shallowRef, onMounted, computed, watch, nextTick } = Vue;
 
         const CONFIG = {
-            COLORS: { 0: '#94a3b8', 1: '#3b82f6', 2: '#10b981', 3: '#f59e0b', 4: '#ef4444', 5: '#8b5cf6', 6: '#ec4899', 7:'#6366f1', 8:'#22c55e' },
+            COLORS: {
+                0: '#94a3b8',
+                1: '#3b82f6',
+                2: '#10b981',
+                3: '#f59e0b',
+                4: '#ef4444',
+                5: '#8b5cf6',
+                6: '#ec4899',
+                7: '#6366f1',
+                8: '#22c55e',
+                9: '#14b8a6',
+                10: '#f97316'
+            },
 
             // 统一动作映射：旧规则(stand/sit/...) + best.pt 8类(dx/dk/...)，保证颜色稳定
             ACTION_MAP: {
                 // === 规则动作 (actions.jsonl / 旧 pipeline) ===
                 listen:0, sit:0, stand:7, bow_head:1,
                 phone:2, sleep:3, interact:4, writing:5, reading:8, lean_table:0,
-                hand_raise:6,
+                hand_raise:6, unknown:0,
 
                 // === best.pt 行为检测 8 类 (case_det / *_behavior.jsonl) ===
                 dx:5, dk:8, tt:0, zt:1, js:6, zl:7, xt:4, jz:4

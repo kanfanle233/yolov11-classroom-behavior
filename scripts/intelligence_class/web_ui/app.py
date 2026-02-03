@@ -330,9 +330,17 @@ def _match_track_id(det_xyxy: List[float], persons: List[Dict[str, Any]], iou_th
     return None
 
 
+def _bucket_track_id(base: int, action: str) -> int:
+    if base != 0:
+        return base
+    act_id = int(ACTION_MAP.get(action, 0))
+    return 10000 + act_id
+
+
 def compress_timeline(frames_data: List[Dict[str, Any]], fps: float = 25.0) -> List[Dict[str, Any]]:
     if not frames_data:
         return []
+    frames = []
     by_track: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for item in frames_data:
         tid = item.get("track_id")
@@ -347,9 +355,20 @@ def compress_timeline(frames_data: List[Dict[str, Any]], fps: float = 25.0) -> L
         if tid_int < 0:
             continue
         act_norm = _normalize_action(str(action))
-        by_track[tid_int].append({"frame": int(fidx), "action": act_norm})
+        fidx_int = int(fidx)
+        frames.append(fidx_int)
+        tid_bucket = _bucket_track_id(tid_int, act_norm)
+        by_track[tid_bucket].append({"frame": fidx_int, "action": act_norm})
 
     compressed: List[Dict[str, Any]] = []
+    if frames:
+        duration_sec = (max(frames) - min(frames)) / max(fps, 1e-6)
+    else:
+        duration_sec = 0.0
+    gap_sec = 0.12 if duration_sec <= 20.0 else 0.2
+    min_event_sec = 0.12 if duration_sec <= 20.0 else 0.2
+    gap_frames = max(1, int(round(gap_sec * fps)))
+    min_event_frames = max(1, int(round(min_event_sec * fps)))
     for tid, trace in by_track.items():
         trace.sort(key=lambda x: x["frame"])
         if not trace:
@@ -362,14 +381,14 @@ def compress_timeline(frames_data: List[Dict[str, Any]], fps: float = 25.0) -> L
                 cur = {"track_id": tid, "action": act, "start_frame": f, "end_frame": f}
                 continue
             is_same = (act == cur["action"])
-            is_cont = (f - cur["end_frame"] <= 5)
+            is_cont = (f - cur["end_frame"] <= gap_frames)
             if is_same and is_cont:
                 cur["end_frame"] = f
             else:
-                if (cur["end_frame"] - cur["start_frame"]) > 5:
+                if (cur["end_frame"] - cur["start_frame"]) >= min_event_frames:
                     compressed.append(cur)
                 cur = {"track_id": tid, "action": act, "start_frame": f, "end_frame": f}
-        if cur and (cur["end_frame"] - cur["start_frame"]) > 5:
+        if cur and (cur["end_frame"] - cur["start_frame"]) >= min_event_frames:
             compressed.append(cur)
 
     out: List[Dict[str, Any]] = []
