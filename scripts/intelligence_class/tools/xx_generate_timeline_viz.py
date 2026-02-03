@@ -219,7 +219,7 @@ def main():
             json.dump({"items": [], "fps": args.fps}, f)
         return
 
-    print(f"🚀 正在处理 Timeline: {source_file.name} ({source_type})")
+    print(f"[Timeline] 处理: {source_file.name} ({source_type})")
 
     # 2. 加载
     raw_data = load_jsonl(source_file)
@@ -234,10 +234,10 @@ def main():
 
         if tracks_path and tracks_path.exists():
             tracks_idx = _index_tracks_by_frame(tracks_path)
-            print(f"🧷 tracks 绑定启用: {tracks_path.name} (frames={len(tracks_idx)})")
+            print(f"[Timeline] tracks 绑定启用: {tracks_path.name} (frames={len(tracks_idx)})")
         else:
             if args.tracks:
-                print(f"⚠️  tracks 文件不存在，跳过绑定: {tracks_path}")
+                    print(f"[Timeline] tracks 文件不存在，跳过绑定: {tracks_path}")
 
         flat_data = []
         for row in raw_data:
@@ -303,7 +303,7 @@ def main():
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(output_obj, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ 已生成 Timeline 数据: {out_file} (包含 {len(timeline_items)} 个事件)")
+    print(f"[Timeline] 已生成: {out_file} (事件数={len(timeline_items)})")
 
 
 if __name__ == "__main__":
@@ -325,4 +325,4 @@ if __name__ == "__main__":
                     json.dump(fallback, f, ensure_ascii=False, indent=2)
             except Exception:
                 pass
-        print(f"❌ Timeline generation failed: {exc}")
+        print(f"[Timeline] generation failed: {exc}")
