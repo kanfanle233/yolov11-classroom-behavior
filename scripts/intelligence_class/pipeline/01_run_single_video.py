@@ -104,6 +104,54 @@ def _ensure_dir(p: Path, dry_run: bool) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+def _pick_best_case_det_model(project_root: Path) -> Optional[Path]:
+    candidates = [
+        project_root / "models" / "best.pt",
+        project_root / "runs" / "detect" / "case_yolo_train" / "weights" / "best.pt",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+
+    best_by_mtime: Optional[Path] = None
+    best_mtime = -1.0
+    detect_root = project_root / "runs" / "detect"
+    if detect_root.exists():
+        for p in detect_root.rglob("best.pt"):
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > best_mtime:
+                best_mtime = mtime
+                best_by_mtime = p
+    return best_by_mtime
+
+
+def _pick_best_pose_model(project_root: Path) -> Optional[Path]:
+    candidates = [
+        project_root / "yolo11l-pose.pt",
+        project_root / "yolo11m-pose.pt",
+        project_root / "yolo11s-pose.pt",
+        project_root / "yolo11n-pose.pt",
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+
+    best_by_mtime: Optional[Path] = None
+    best_mtime = -1.0
+    for p in project_root.glob("*-pose.pt"):
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best_mtime = mtime
+            best_by_mtime = p
+    return best_by_mtime
+
+
 # =====================================================================================
 # 1.5) 视频转码工具
 # =====================================================================================
@@ -245,7 +293,12 @@ def run_case_det(
 # 3) 子进程 runner
 # =====================================================================================
 
-def run_step(cmd: List[str], step_name: str, dry_run: bool = False) -> Tuple[bool, str]:
+def run_step(
+    cmd: List[str],
+    step_name: str,
+    dry_run: bool = False,
+    log_dir: Optional[Path] = None,
+) -> Tuple[bool, str]:
     print("\n" + "=" * 60)
     print(f"[执行] {step_name}")
     print(f"      CMD: {' '.join(cmd)}")
@@ -255,7 +308,15 @@ def run_step(cmd: List[str], step_name: str, dry_run: bool = False) -> Tuple[boo
         return True, "Dry Run"
 
     try:
-        subprocess.run(cmd, check=True)
+        if log_dir is None:
+            subprocess.run(cmd, check=True)
+            return True, "Success"
+
+        log_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = step_name.replace(" ", "_").replace(":", "_")
+        log_path = log_dir / f"{safe_name}.log"
+        with log_path.open("w", encoding="utf-8") as f:
+            subprocess.run(cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
         return True, "Success"
     except subprocess.CalledProcessError as e:
         msg = f"步骤执行失败，退出码 {e.returncode}."
@@ -368,6 +429,8 @@ def export_bundles(
     export_behavior: bool,
     make_overlays: bool,
     view_name: Optional[str] = None,
+    pose_model: Optional[str] = None,
+    case_det_model: Optional[str] = None,
 ) -> None:
     fps_use, n_frames, w, h = get_video_info(video_path, fps_fallback)
 
@@ -393,6 +456,8 @@ def export_bundles(
                 "frames": n_frames,
                 "labels": CASE_NAMES,
                 "source_case_det": str(case_det_jsonl),
+                "pose_model": pose_model,
+                "case_det_model": case_det_model,
                 "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             },
             dry_run=dry_run,
@@ -414,6 +479,8 @@ def export_bundles(
                 "width": w,
                 "height": h,
                 "source_tracks": str(tracks_jsonl),
+                "pose_model": pose_model,
+                "case_det_model": case_det_model,
                 "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             },
             dry_run=dry_run,
@@ -467,6 +534,9 @@ def run_single_video(
     run_timeline: int = 1,
     timeline_source: str = "behavior",                 # auto|actions|behavior
     timeline_tracks: str = "pose_tracks_smooth.jsonl", # 相对 case_dir
+    # short video + logging
+    short_video: int = 0,
+    log_dir: Optional[str] = None,
     # models
     pose_model: str = "yolo11s-pose.pt",
     asr_model: str = "base",
@@ -489,7 +559,7 @@ def run_single_video(
     path_case_det_jsonl = out_p / "case_det.jsonl"
 
     # Scripts
-    script_pose = scripts_dir / "02_export_keypoints_jsonl.py"
+    script_pose = pipeline_dir / "02_export_keypoints_jsonl.py"
     script_track = pipeline_dir / "03_track_and_smooth_v2.py"
     script_attach = pipeline_dir / "03b_attach_keypoints.py"
     script_actions = pipeline_dir / "04_action_rules.py"
@@ -502,33 +572,84 @@ def run_single_video(
     script_timeline = tools_dir / "xx_generate_timeline_viz.py"
 
     python_exe = sys.executable
+    log_dir_path = Path(log_dir).resolve() if log_dir else (out_p / "logs")
+    if dry_run:
+        log_dir_path = None
+
+    if int(short_video) == 1:
+        track_min_frames = 10
+        track_max_miss = 6
+        action_min_track_frames = 10
+        action_raise_hand_sec = 0.3
+        action_head_down_sec = 0.4
+        action_stand_sec = 0.4
+    else:
+        track_min_frames = 30
+        track_max_miss = 10
+        action_min_track_frames = 30
+        action_raise_hand_sec = 0.5
+        action_head_down_sec = 0.7
+        action_stand_sec = 0.7
+
+    used_case_det_model: Optional[str] = None
+    used_pose_model: Optional[str] = None
 
     # ========= Step 0: Case Det (best.pt) =========
-    if int(case_det) == 1 and str(case_det_model).strip():
-        model_case = resolve_under_project(project_root, str(case_det_model))
+    if int(case_det) == 1:
+        model_case = None
+        if str(case_det_model).strip():
+            model_case = resolve_under_project(project_root, str(case_det_model))
+            if not model_case.exists():
+                print(f"[WARN] case_det_model not found: {model_case}")
+                model_case = None
+        if model_case is None:
+            model_case = _pick_best_case_det_model(project_root)
+        if model_case is None:
+            return {"status": "failed", "error": "case_det_model not found", "video_id": video_id}
+        used_case_det_model = str(model_case)
         ok, msg = run_case_det(video_p, path_case_det_jsonl, model_case, float(case_conf), fps, dry_run, skip_existing)
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
 
     # ========= Step 1: Pose =========
     if int(run_pose) == 1 and check_script_exists(script_pose):
-        pose_model_path = resolve_under_project(project_root, pose_model)
+        pose_model_path = resolve_under_project(project_root, pose_model) if pose_model else None
+        if pose_model_path and not pose_model_path.exists():
+            print(f"[WARN] pose_model not found: {pose_model_path}")
+            pose_model_path = None
+        if pose_model_path is None:
+            pose_model_path = _pick_best_pose_model(project_root)
+        if pose_model_path is None:
+            return {"status": "failed", "error": "pose_model not found", "video_id": video_id}
+        used_pose_model = str(pose_model_path)
         cmd = [
             python_exe, str(script_pose),
             "--video", str(video_p),
             "--out", str(path_pose_jsonl),
             "--model", str(pose_model_path),
         ]
-        ok, msg = run_step(cmd, "步骤 1: 姿态估计", dry_run)
+        ok, msg = run_step(cmd, "步骤 1: 姿态估计", dry_run, log_dir_path)
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
 
     # ========= Step 2: Track =========
     if int(run_track) == 1 and check_script_exists(script_track) and check_script_exists(script_attach):
         ok, msg = run_step(
-            [python_exe, str(script_track), "--in", str(path_pose_jsonl), "--out", str(path_track_jsonl)],
+            [
+                python_exe,
+                str(script_track),
+                "--in",
+                str(path_pose_jsonl),
+                "--out",
+                str(path_track_jsonl),
+                "--min_frames",
+                str(track_min_frames),
+                "--max_miss",
+                str(track_max_miss),
+            ],
             "步骤 2: 轨迹跟踪",
             dry_run,
+            log_dir_path,
         )
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
@@ -543,6 +664,7 @@ def run_single_video(
             ],
             "步骤 2.5: 关联关键点",
             dry_run,
+            log_dir_path,
         )
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
@@ -550,9 +672,27 @@ def run_single_video(
     # ========= Step 3: Actions =========
     if int(run_actions) == 1 and check_script_exists(script_actions):
         ok, msg = run_step(
-            [python_exe, str(script_actions), "--in", str(path_track_kpts_jsonl), "--out", str(path_actions_jsonl), "--fps", str(float(fps))],
+            [
+                python_exe,
+                str(script_actions),
+                "--in",
+                str(path_track_kpts_jsonl),
+                "--out",
+                str(path_actions_jsonl),
+                "--fps",
+                str(float(fps)),
+                "--raise_hand_sec",
+                str(action_raise_hand_sec),
+                "--head_down_sec",
+                str(action_head_down_sec),
+                "--stand_sec",
+                str(action_stand_sec),
+                "--min_track_frames",
+                str(action_min_track_frames),
+            ],
             "步骤 3: 动作规则",
             dry_run,
+            log_dir_path,
         )
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
@@ -560,9 +700,20 @@ def run_single_video(
     # ========= Step 4: ASR =========
     if int(run_asr) == 1 and check_script_exists(script_asr):
         ok, msg = run_step(
-            [python_exe, str(script_asr), "--video", str(video_p), "--out_dir", str(out_p), "--model", str(asr_model)],
+            [
+                python_exe,
+                str(script_asr),
+                "--video",
+                str(video_p),
+                "--out_dir",
+                str(out_p),
+                "--model",
+                str(asr_model),
+                "--skip_on_error",
+            ],
             "步骤 4: 语音转写",
             dry_run,
+            log_dir_path,
         )
         if not ok:
             return {"status": "failed", "error": msg, "video_id": video_id}
@@ -583,6 +734,8 @@ def run_single_video(
         export_behavior=bool(int(export_behavior)),
         make_overlays=bool(int(make_overlays)),
         view_name=view_name,
+        pose_model=used_pose_model or (str(pose_model) if pose_model else None),
+        case_det_model=used_case_det_model or (str(case_det_model) if case_det_model else None),
     )
 
     # ========= Step 5: Align =========
@@ -592,16 +745,30 @@ def run_single_video(
                 [python_exe, str(script_align), "--case_dir", str(out_p), "--fps", str(float(fps))],
                 "步骤 5: 多模态对齐",
                 dry_run,
+                log_dir_path,
             )
             if not ok:
                 return {"status": "failed", "error": msg, "video_id": video_id}
 
     # ========= Step 6-8: Reports =========
     if int(run_summarize) == 1 and check_script_exists(script_sum):
+        cmd = [
+            python_exe,
+            str(script_sum),
+            "--case_dir",
+            str(out_p),
+            "--case_id",
+            str(case_id),
+            "--overwrite",
+            "1",
+        ]
+        if int(short_video) == 1:
+            cmd += ["--short_video", "1"]
         run_step(
-            [python_exe, str(script_sum), "--out_root", str(out_p.parent.parent), "--view", str(out_p.parent.name), "--id", str(case_id), "--overwrite", "1"],
+            cmd,
             "步骤 6: 案例报告",
             dry_run,
+            log_dir_path,
         )
 
     if int(run_aggregate) == 1 and check_script_exists(script_agg):
@@ -609,6 +776,7 @@ def run_single_video(
             [python_exe, str(script_agg), "--ds_root", str(out_p.parent.parent), "--views", str(out_p.parent.name)],
             "步骤 7: 聚合报表",
             dry_run,
+            log_dir_path,
         )
 
     if int(run_projection) == 1 and check_script_exists(script_proj):
@@ -616,6 +784,7 @@ def run_single_video(
             [python_exe, "-W", "ignore", str(script_proj), "--root", str(out_p.parent.parent), "--target_case", str(out_p)],
             "步骤 8: 静态投影",
             dry_run,
+            log_dir_path,
         )
 
     # ========= Step 9: Timeline Viz =========
@@ -635,7 +804,7 @@ def run_single_video(
                 tracks_path = out_p / tracks_path
             cmd += ["--tracks", str(tracks_path)]
 
-        run_step(cmd, "步骤 9: 生成时间轴可视化", dry_run)
+        run_step(cmd, "步骤 9: 生成时间轴可视化", dry_run, log_dir_path)
 
     return {"status": "success", "video_id": video_id, "case_id": case_id, "out_dir": str(out_p)}
 
@@ -676,6 +845,8 @@ def main():
     parser.add_argument("--run_timeline", type=int, default=1)
     parser.add_argument("--timeline_source", default="behavior", choices=["auto", "actions", "behavior"])
     parser.add_argument("--timeline_tracks", default="pose_tracks_smooth.jsonl")
+    parser.add_argument("--short_video", type=int, default=0, help="optimize thresholds for short videos (6-20s)")
+    parser.add_argument("--log_dir", type=str, default=None, help="store subprocess logs (stdout+stderr)")
 
     args = parser.parse_args()
 
@@ -705,6 +876,8 @@ def main():
         run_timeline=int(args.run_timeline),
         timeline_source=str(args.timeline_source),
         timeline_tracks=str(args.timeline_tracks),
+        short_video=int(args.short_video),
+        log_dir=str(args.log_dir) if args.log_dir else None,
         pose_model=str(args.pose_model),
         asr_model=str(args.asr_model),
     )
