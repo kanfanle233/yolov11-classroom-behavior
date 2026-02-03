@@ -300,6 +300,51 @@ def _pick_prefix_from_case_dir(case_dir: Path, case_id: Optional[str]) -> Option
     return None
 
 
+def _pick_prefix_from_case_dir(case_dir: Path, case_id: Optional[str]) -> Optional[str]:
+    if case_id:
+        return case_id
+
+    jsonls = [p for p in case_dir.glob("*.jsonl") if "behavior" not in p.name.lower()]
+    if jsonls:
+        return sorted(jsonls, key=lambda x: x.stat().st_size, reverse=True)[0].stem
+
+    metas = list(case_dir.glob("*.meta.json"))
+    if metas:
+        return sorted(metas, key=lambda x: x.stat().st_size, reverse=True)[0].stem.replace(".meta", "")
+
+    return None
+
+
+def _pick_prefix_from_case_dir(case_dir: Path, case_id: Optional[str]) -> Optional[str]:
+    if case_id:
+        return case_id
+
+    jsonls = [p for p in case_dir.glob("*.jsonl") if "behavior" not in p.name.lower()]
+    if jsonls:
+        return sorted(jsonls, key=lambda x: x.stat().st_size, reverse=True)[0].stem
+
+    metas = list(case_dir.glob("*.meta.json"))
+    if metas:
+        return sorted(metas, key=lambda x: x.stat().st_size, reverse=True)[0].stem.replace(".meta", "")
+
+    return None
+
+
+def _pick_prefix_from_case_dir(case_dir: Path, case_id: Optional[str]) -> Optional[str]:
+    if case_id:
+        return case_id
+
+    jsonls = [p for p in case_dir.glob("*.jsonl") if "behavior" not in p.name.lower()]
+    if jsonls:
+        return sorted(jsonls, key=lambda x: x.stat().st_size, reverse=True)[0].stem
+
+    metas = list(case_dir.glob("*.meta.json"))
+    if metas:
+        return sorted(metas, key=lambda x: x.stat().st_size, reverse=True)[0].stem.replace(".meta", "")
+
+    return None
+
+
 # -------------------------
 # CLI
 # -------------------------
