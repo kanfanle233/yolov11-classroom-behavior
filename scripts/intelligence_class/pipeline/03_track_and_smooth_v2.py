@@ -202,7 +202,7 @@ def main():
     # lifecycle
     ap.add_argument("--max_miss", type=int, default=10, help="max missed frames before a track is dropped")
     ap.add_argument("--min_frames", type=int, default=30, help="min hits to keep a track (filter short tracks)")
-    ap.add_argument("--write_all", action="store_true", help="write all tracks without min_frames filtering (debug)")
+    ap.add_argument("--write_all", action="store_true", help="write all tracks without min_frames filtering (debug/short video)")
 
     # EMA
     ap.add_argument("--alpha_bbox", type=float, default=0.45, help="EMA alpha for bbox")

@@ -1,10 +1,19 @@
+import argparse
 import json
 import sys
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.manifold import MDS, TSNE
+
+try:
+    from scripts.intelligence_class._utils.action_map import ALL_ACTIONS
+except ModuleNotFoundError:
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from scripts.intelligence_class._utils.action_map import ALL_ACTIONS
 
 # 尝试引入 Levenshtein
 try:
@@ -26,7 +35,7 @@ def load_jsonl(path: Path):
     return data
 
 
-def compute_features_and_save(case_dir: Path):
+def compute_features_and_save(case_dir: Path, min_tracks: int = 2):
     """
     计算单个案例的投影数据并保存为 static_projection.json
     """
@@ -52,8 +61,7 @@ def compute_features_and_save(case_dir: Path):
         cx = (bbox[0] + bbox[2]) / 2 if len(bbox) == 4 else 0
         tracks_stats[tid]["positions"].append(cx)
 
-    all_possible_actions = ["hand_raise", "stand", "sit", "reading", "writing", "phone", "sleep", "bow_head",
-                            "lean_table"]
+    all_possible_actions = ALL_ACTIONS
     X = []
     ids = []
 
@@ -72,7 +80,7 @@ def compute_features_and_save(case_dir: Path):
         X.append(vec)
         ids.append(tid)
 
-    if len(X) < 2:
+    if len(X) < min_tracks:
         return
 
     # 2. 计算 PCA (默认使用 PCA + Euclidean，最稳健)
@@ -101,7 +109,15 @@ def compute_features_and_save(case_dir: Path):
         print(f"  [Err] Failed {case_dir.name}: {e}")
 
 
-def main(demo_web_root: str):
+def main(demo_web_root: str, min_tracks: int, target_case: str = ""):
+    if target_case:
+        case_dir = Path(target_case)
+        if not case_dir.exists():
+            print(f"Target case not found: {case_dir}")
+            return
+        compute_features_and_save(case_dir, min_tracks=min_tracks)
+        return
+
     root = Path(demo_web_root)
     if not root.exists():
         print("Demo Web root not found")
@@ -113,11 +129,22 @@ def main(demo_web_root: str):
         if view_dir.is_dir() and not view_dir.name.startswith("_"):
             for case_dir in view_dir.iterdir():
                 if case_dir.is_dir():
-                    compute_features_and_save(case_dir)
+                    compute_features_and_save(case_dir, min_tracks=min_tracks)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=str, default="", help="root with view/case folders")
+    parser.add_argument("--target_case", type=str, default="", help="single case dir to process")
+    parser.add_argument("--min_tracks", type=int, default=2)
+    parser.add_argument("--short_video", type=int, default=0)
+    args = parser.parse_args()
+
     # 默认路径适配您的项目结构
     # YOLOv11/scripts/intelligence_class/tools/xx... -> YOLOv11/output/.../_demo_web
     default_root = Path(__file__).parents[3] / "output" / "智慧课堂学生行为数据集" / "_demo_web"
-    main(str(default_root))
+    root = args.root or str(default_root)
+    min_tracks = args.min_tracks
+    if int(args.short_video) == 1 and args.min_tracks == 2:
+        min_tracks = 1
+    main(root, min_tracks=min_tracks, target_case=args.target_case)
