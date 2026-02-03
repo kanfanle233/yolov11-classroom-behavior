@@ -307,4 +307,22 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        case_dir = None
+        for i, arg in enumerate(sys.argv):
+            if arg == "--case_dir" and i + 1 < len(sys.argv):
+                case_dir = Path(sys.argv[i + 1])
+                break
+        if case_dir and case_dir.exists():
+            try:
+                fallback = {
+                    "meta": {"error": str(exc), "source": None, "source_type": None, "fps": None},
+                    "items": [],
+                }
+                with open(case_dir / "timeline_viz.json", "w", encoding="utf-8") as f:
+                    json.dump(fallback, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+        print(f"❌ Timeline generation failed: {exc}")
