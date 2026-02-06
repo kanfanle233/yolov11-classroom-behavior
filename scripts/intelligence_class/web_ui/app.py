@@ -13,9 +13,6 @@ from collections import defaultdict
 from enum import Enum
 
 import numpy as np
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.decomposition import PCA
-from sklearn.manifold import MDS, TSNE
 
 # ---------------- MODIFIED IMPORTS ----------------
 # Added Query
@@ -534,10 +531,17 @@ class ProjectionMetric(str, Enum):
 
 
 # ---------------- NEW HELPERS for Sklearn Compatibility ----------------
-def _make_mds_precomputed(n_components=2, random_state=0):
+def _get_sklearn_components():
+    from sklearn.preprocessing import StandardScaler, MinMaxScaler
+    from sklearn.decomposition import PCA
+    from sklearn.manifold import MDS, TSNE
+    return StandardScaler, MinMaxScaler, PCA, MDS, TSNE
+
+
+def _make_mds_precomputed(mds_cls, n_components=2, random_state=0):
     """Compatible wrapper for MDS with precomputed dissimilarity."""
     try:
-        return MDS(
+        return mds_cls(
             n_components=n_components,
             dissimilarity="precomputed",
             normalized_stress="auto",
@@ -545,18 +549,18 @@ def _make_mds_precomputed(n_components=2, random_state=0):
         )
     except TypeError:
         # Fallback for older sklearn without normalized_stress
-        return MDS(
+        return mds_cls(
             n_components=n_components,
             dissimilarity="precomputed",
             random_state=random_state,
         )
 
 
-def _fit_tsne_2d(X_std):
+def _fit_tsne_2d(tsne_cls, X_std):
     """Compatible wrapper for TSNE fit_transform."""
     perplexity = max(1, min(30, len(X_std) - 1))
     try:
-        tsne = TSNE(
+        tsne = tsne_cls(
             n_components=2,
             init="pca",
             learning_rate="auto",
@@ -565,7 +569,7 @@ def _fit_tsne_2d(X_std):
         )
     except TypeError:
         # Fallback for older sklearn without learning_rate="auto"
-        tsne = TSNE(
+        tsne = tsne_cls(
             n_components=2,
             init="pca",
             learning_rate=200.0,
@@ -1182,6 +1186,7 @@ def get_projection(
     # -------------------------------------------------------------
 
     try:
+        StandardScaler, MinMaxScaler, PCA, MDS, TSNE = _get_sklearn_components()
         # Use wrapper with signature
         X, ids, tracks_stats = compute_action_features(case_dir)
         if not _is_features_good(X, ids, min_points=3):
@@ -1193,7 +1198,7 @@ def get_projection(
         if metric == ProjectionMetric.LEVENSHTEIN:
             dist_matrix = compute_levenshtein_matrix(tracks_stats, ids)
             # Safe call using helper
-            mds = _make_mds_precomputed(n_components=2, random_state=0)
+            mds = _make_mds_precomputed(MDS, n_components=2, random_state=0)
             points_2d = mds.fit_transform(dist_matrix)
 
         else:
@@ -1208,7 +1213,7 @@ def get_projection(
                 )
             elif method == ProjectionMethod.TSNE:
                 # Safe call using helper
-                points_2d = _fit_tsne_2d(X_std)
+                points_2d = _fit_tsne_2d(TSNE, X_std)
             else:  # MDS
                 points_2d = MDS(n_components=2).fit_transform(X_std)
         # -----------------------------------------------------------
