@@ -209,6 +209,7 @@ class TranscriptCallback:
 
 # ================= main =================
 def main():
+    base_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description="DashScope ASR 实时识别脚本（输出统一 transcript.jsonl schema）")
     parser.add_argument("--video", type=str, required=True, help="视频路径 (用于提取音频)")
     parser.add_argument("--out_dir", type=str, required=True, help="输出目录")
@@ -225,7 +226,7 @@ def main():
     if not api_key:
         out_dir = Path(args.out_dir)
         if not out_dir.is_absolute():
-            out_dir = (Path(__file__).resolve().parents[1] / out_dir).resolve()
+            out_dir = (base_dir / out_dir).resolve()
         transcript_path = ensure_transcript_file(out_dir)
         print("[WARN] 未配置 DashScope API Key，已生成空 transcript.jsonl 并跳过 ASR。")
         print(f"[PATH] {transcript_path}")
@@ -235,7 +236,7 @@ def main():
 
     out_dir = Path(args.out_dir)
     if not out_dir.is_absolute():
-        out_dir = (Path(__file__).resolve().parents[1] / out_dir).resolve()
+        out_dir = (base_dir / out_dir).resolve()
 
     api_key = resolve_api_key()
     if not api_key:
@@ -258,6 +259,8 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     video_path = Path(args.video)
+    if not video_path.is_absolute():
+        video_path = (base_dir / video_path).resolve()
     wav_path = out_dir / "asr_audio_16k.wav"
     jsonl_path = out_dir / "transcript.jsonl"
 

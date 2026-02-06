@@ -68,7 +68,7 @@ class ClassroomSTGCN(nn.Module):
 
 # === 2. 辅助函数：构建交互图 ===
 
-def build_graph_from_frame(persons, max_nodes=50, dist_thres=0.15):
+def build_graph_from_frame(persons, img_width=1920, img_height=1080, max_nodes=50, dist_thres=0.15):
     """
     基于距离构建邻接矩阵。
     注意：这里的坐标需要归一化 (0-1)
@@ -85,10 +85,8 @@ def build_graph_from_frame(persons, max_nodes=50, dist_thres=0.15):
     for i in range(valid_count):
         p = persons[i]
         bbox = p['bbox']  # [x1, y1, x2, y2]
-        w_img, h_img = 1920, 1080  # 假设分辨率，或从参数传入
-
-        cx = (bbox[0] + bbox[2]) / 2 / w_img
-        cy = (bbox[1] + bbox[3]) / 2 / h_img
+        cx = (bbox[0] + bbox[2]) / 2 / img_width
+        cy = (bbox[1] + bbox[3]) / 2 / img_height
         conf = p.get('conf', 1.0)
 
         features[0, i] = cx
@@ -120,10 +118,21 @@ def main():
     parser.add_argument("--out", required=True, help="group_events.jsonl")
     parser.add_argument("--model_weight", default="", help="Path to trained ST-GCN weights")
     parser.add_argument("--window_size", type=int, default=50, help="Frame window size for classification")
+    parser.add_argument("--width", type=int, default=1920, help="frame width for normalization")
+    parser.add_argument("--height", type=int, default=1080, help="frame height for normalization")
+    parser.add_argument("--fps", type=float, default=25.0, help="video fps for timestamps")
     args = parser.parse_args()
 
+    base_dir = Path(__file__).resolve().parents[1]
     pose_path = Path(args.pose)
+    if not pose_path.is_absolute():
+        pose_path = (base_dir / pose_path).resolve()
     out_path = Path(args.out)
+    if not out_path.is_absolute():
+        out_path = (base_dir / out_path).resolve()
+    model_weight = Path(args.model_weight) if args.model_weight else None
+    if model_weight and not model_weight.is_absolute():
+        model_weight = (base_dir / model_weight).resolve()
 
     # 加载数据
     data_by_frame = defaultdict(list)
@@ -142,11 +151,11 @@ def main():
     model = ClassroomSTGCN(num_classes=3).to(device)
 
     has_weights = False
-    if args.model_weight and Path(args.model_weight).exists():
-        model.load_state_dict(torch.load(args.model_weight))
+    if model_weight and model_weight.exists():
+        model.load_state_dict(torch.load(model_weight))
         has_weights = True
         model.eval()
-        print(f"[Model] Loaded weights from {args.model_weight}")
+        print(f"[Model] Loaded weights from {model_weight}")
     else:
         print("[Model] No weights provided. Using heuristic-based pseudo-prediction.")
 
@@ -164,7 +173,7 @@ def main():
 
         for f_idx in range(start_f, end_f):
             persons = data_by_frame.get(f_idx, [])
-            feat, adj = build_graph_from_frame(persons)
+            feat, adj = build_graph_from_frame(persons, img_width=args.width, img_height=args.height)
             clip_features.append(feat)
             clip_adjs.append(adj)
 
@@ -223,8 +232,8 @@ def main():
             events.append({
                 "start_frame": start_f,
                 "end_frame": end_f,
-                "start_time": start_f / 25.0,  # 假设 25fps
-                "end_time": end_f / 25.0,
+                "start_time": start_f / float(args.fps),
+                "end_time": end_f / float(args.fps),
                 "group_event": label,
                 "confidence": float(f"{confidence:.2f}")
             })
