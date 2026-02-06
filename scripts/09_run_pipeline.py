@@ -1,9 +1,14 @@
 # scripts/09_run_pipeline.py
 import argparse
+import json
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import List
+
+import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
@@ -78,6 +83,113 @@ def resolve_video_path(video_arg: str) -> Path:
     return (PROJECT_ROOT / candidate).resolve()
 
 
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def _get_video_info(video_path: Path, fps_fallback: float = 25.0):
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return fps_fallback, 0, 0, 0
+    fps = cap.get(cv2.CAP_PROP_FPS) or fps_fallback
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    cap.release()
+    return float(fps), int(n), int(w), int(h)
+
+
+def _resolve_out_dir(args, video_path: Path, base_dir: Path) -> Path:
+    if args.out_dir:
+        return resolve_video_path(args.out_dir)
+    if args.output_root:
+        root = resolve_video_path(args.output_root)
+        if args.view:
+            view_dir = root / args.view
+        else:
+            view_dir = root
+        case_id = args.case_id or video_path.stem
+        if args.video_id:
+            vid = args.video_id
+        else:
+            view_code = args.view_code or args.view or "case"
+            vid = f"{view_code}__{case_id}"
+        return view_dir / vid
+    return (base_dir / "output" / (args.name or video_path.stem)).resolve()
+
+
+def _export_compat_bundle(
+    *,
+    out_dir: Path,
+    video_path: Path,
+    case_id: str,
+    video_id: str,
+    view_name: str,
+    pose_tracks: Path,
+    actions_jsonl: Path,
+    overlay_video: Path,
+    timeline_png: Path,
+    fps_hint: float,
+) -> None:
+    fps, n_frames, w, h = _get_video_info(video_path, fps_fallback=fps_hint)
+    legacy_jsonl = out_dir / f"{case_id}.jsonl"
+    legacy_meta = out_dir / f"{case_id}.meta.json"
+    legacy_summary = out_dir / f"{case_id}_summary.json"
+
+    if pose_tracks.exists():
+        shutil.copy2(pose_tracks, legacy_jsonl)
+        _write_json(
+            legacy_meta,
+            {
+                "video_id": video_id,
+                "case_id": case_id,
+                "view": view_name,
+                "video_path": str(video_path),
+                "fps": fps,
+                "frames": n_frames,
+                "width": w,
+                "height": h,
+                "source_tracks": str(pose_tracks),
+                "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
+
+    if actions_jsonl.exists():
+        beh_jsonl = out_dir / f"{case_id}_behavior.jsonl"
+        beh_meta = out_dir / f"{case_id}_behavior.meta.json"
+        shutil.copy2(actions_jsonl, beh_jsonl)
+        _write_json(
+            beh_meta,
+            {
+                "video_id": video_id,
+                "case_id": case_id,
+                "view": view_name,
+                "video_path": str(video_path),
+                "fps": fps,
+                "frames": n_frames,
+                "labels": [],
+                "source_actions": str(actions_jsonl),
+                "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
+
+    if overlay_video.exists():
+        compat_overlay = out_dir / f"{case_id}_overlay.mp4"
+        if compat_overlay != overlay_video:
+            shutil.copy2(overlay_video, compat_overlay)
+
+    timeline_json = timeline_png.with_suffix(".json")
+    if timeline_json.exists():
+        timeline_alias = out_dir / "timeline_viz.json"
+        if timeline_alias != timeline_json:
+            shutil.copy2(timeline_json, timeline_alias)
+
+    if not legacy_summary.exists():
+        _write_json(legacy_summary, {"info": "See downstream summary outputs for details."})
+
+
 def main():
     base_dir = PROJECT_ROOT
     scripts_dir = Path(__file__).resolve().parent
@@ -86,6 +198,12 @@ def main():
     parser.add_argument("--video", type=str, default="data/videos/demo3.mp4")
     parser.add_argument("--name", type=str, default="")
     parser.add_argument("--out_dir", type=str, default="")
+    parser.add_argument("--output_root", type=str, default="", help="root folder for demo outputs (e.g. output/.../_demo_web)")
+    parser.add_argument("--view", type=str, default="", help="view name for subfolder")
+    parser.add_argument("--view_code", type=str, default="", help="view code for folder naming (e.g. rear/teacher)")
+    parser.add_argument("--case_id", type=str, default="", help="case id for output naming (e.g. 0001)")
+    parser.add_argument("--video_id", type=str, default="", help="explicit video_id folder name")
+    parser.add_argument("--export_compat", type=int, default=1, help="1=export 01_run_single_video-style bundle")
     parser.add_argument("--py", type=str, default=sys.executable)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--from_step", type=int, default=1)
@@ -109,11 +227,8 @@ def main():
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
-    name = args.name if args.name else video_path.stem
-    if args.out_dir:
-        out_dir = resolve_video_path(args.out_dir)
-    else:
-        out_dir = (base_dir / "output" / name).resolve()
+    name = args.name if args.name else (args.case_id or video_path.stem)
+    out_dir = _resolve_out_dir(args, video_path, base_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # === Output Paths ===
@@ -259,6 +374,27 @@ def main():
                                     "--gap_tol", str(args.viz_gap_tol),
                                     "--min_dur", str(args.viz_min_dur),
                                     "--fps", fps_str]))
+
+    if int(args.export_compat) == 1:
+        case_id = args.case_id or name
+        view_name = args.view or ""
+        if args.video_id:
+            video_id = args.video_id
+        else:
+            view_code = args.view_code or args.view or "case"
+            video_id = f"{view_code}__{case_id}"
+        _export_compat_bundle(
+            out_dir=out_dir,
+            video_path=video_path,
+            case_id=case_id,
+            video_id=video_id,
+            view_name=view_name,
+            pose_tracks=pose_tracks,
+            actions_jsonl=actions_jsonl,
+            overlay_video=overlay_video,
+            timeline_png=timeline_png,
+            fps_hint=args.fps,
+        )
 
     print(f"\n✅ All Steps Completed! Results in: {out_dir}")
     print(f"👉 Pose Demo Video      : {pose_demo_video}")
