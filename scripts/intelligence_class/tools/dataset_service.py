@@ -77,27 +77,59 @@ class DatasetService:
     def get_views_stats(self) -> Dict[str, Any]:
         idx = self.get_index()
         views = idx.get("views", {})
+        videos = idx.get("videos", []) or []
+        view_counts = idx.get("meta", {}).get("view_counts", {}) or {}
 
         out: Dict[str, Any] = {}
-        for view, info in views.items():
-            cases = info.get("cases", {}) or {}
-            total = len(cases)
+        if views:
+            for view, info in views.items():
+                cases = info.get("cases", {}) or {}
+                total = len(cases)
 
-            def _truthy(v):  # 有些 index 会用 0/1 或 True/False
-                return bool(v) and str(v).lower() not in ("none", "null", "")
+                def _truthy(v):  # 有些 index 会用 0/1 或 True/False
+                    return bool(v) and str(v).lower() not in ("none", "null", "")
 
-            with_overlay = sum(1 for c in cases.values() if _truthy(c.get("has_overlay")) or _truthy(c.get("overlay")))
-            with_behavior = sum(1 for c in cases.values() if _truthy(c.get("has_behavior")) or _truthy(c.get("behavior")))
-            with_meta = sum(1 for c in cases.values() if _truthy(c.get("has_meta")) or _truthy(c.get("meta")))
-            with_main = sum(1 for c in cases.values() if _truthy(c.get("has_main")) or _truthy(c.get("main")))
+                with_overlay = sum(
+                    1 for c in cases.values() if _truthy(c.get("has_overlay")) or _truthy(c.get("overlay"))
+                )
+                with_behavior = sum(
+                    1 for c in cases.values() if _truthy(c.get("has_behavior")) or _truthy(c.get("behavior"))
+                )
+                with_meta = sum(1 for c in cases.values() if _truthy(c.get("has_meta")) or _truthy(c.get("meta")))
+                with_main = sum(1 for c in cases.values() if _truthy(c.get("has_main")) or _truthy(c.get("main")))
 
-            out[view] = {
-                "total_cases": total,
-                "with_meta": with_meta,
-                "with_main": with_main,
-                "with_overlay": with_overlay,
-                "with_behavior": with_behavior,
-            }
+                out[view] = {
+                    "total_cases": total,
+                    "with_meta": with_meta,
+                    "with_main": with_main,
+                    "with_overlay": with_overlay,
+                    "with_behavior": with_behavior,
+                }
+        else:
+            if view_counts:
+                for view, total in sorted(view_counts.items()):
+                    out[view] = {
+                        "total_cases": total,
+                        "with_meta": 0,
+                        "with_main": 0,
+                        "with_overlay": 0,
+                        "with_behavior": 0,
+                        "note": "Derived from dataset_index.json meta.view_counts (no case metadata).",
+                    }
+            else:
+                by_view: Dict[str, int] = defaultdict(int)
+                for rec in videos:
+                    view_code = rec.get("view_code") or rec.get("view") or "unknown"
+                    by_view[str(view_code)] += 1
+                for view, total in sorted(by_view.items()):
+                    out[view] = {
+                        "total_cases": total,
+                        "with_meta": 0,
+                        "with_main": 0,
+                        "with_overlay": 0,
+                        "with_behavior": 0,
+                        "note": "Derived from dataset_index.json videos list (no case metadata).",
+                    }
 
         return {
             "dataset": self.dataset_name,
@@ -130,7 +162,8 @@ class DatasetService:
         items = []
 
         for rec in iter_jsonl(self.failures_path):
-            if view and str(rec.get("view", "")).strip() != str(view).strip():
+            rec_view = rec.get("view") or rec.get("view_code") or rec.get("viewCode")
+            if view and str(rec_view or "").strip().lower() != str(view).strip().lower():
                 continue
 
             total += 1
