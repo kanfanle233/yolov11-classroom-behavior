@@ -3,6 +3,7 @@ import sys
 import json
 import shutil
 import subprocess
+import importlib.util
 import warnings
 import re
 from pathlib import Path
@@ -25,19 +26,56 @@ from pydantic import BaseModel
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-try:
+_lev_spec = importlib.util.find_spec("Levenshtein")
+if _lev_spec is not None:
     import Levenshtein
-except ImportError:
+else:
     Levenshtein = None
 
-try:
-    from scripts.intelligence_class._utils.action_map import ACTION_MAP as COMMON_ACTION_MAP
-    from scripts.intelligence_class._utils.action_map import LABEL_NORMALIZE as COMMON_LABEL_NORMALIZE
-except ModuleNotFoundError:
-    PROJECT_ROOT_FALLBACK = Path(__file__).resolve().parents[3]
-    sys.path.insert(0, str(PROJECT_ROOT_FALLBACK))
-    from scripts.intelligence_class._utils.action_map import ACTION_MAP as COMMON_ACTION_MAP
-    from scripts.intelligence_class._utils.action_map import LABEL_NORMALIZE as COMMON_LABEL_NORMALIZE
+
+def _load_action_map() -> Tuple[Dict[str, int], Dict[str, str]]:
+    candidates = []
+    current_file = Path(__file__).resolve()
+    for parent in [current_file] + list(current_file.parents):
+        candidates.append(parent / "scripts" / "intelligence_class" / "_utils" / "action_map.py")
+        candidates.append(parent / "scripts" / "intelligence class" / "_utils" / "action_map.py")
+    for cand in candidates:
+        if cand.exists():
+            spec = importlib.util.spec_from_file_location("ic_action_map", str(cand))
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)  # type: ignore
+                return getattr(module, "ACTION_MAP", {}), getattr(module, "LABEL_NORMALIZE", {})
+    return {}, {}
+
+
+COMMON_ACTION_MAP, COMMON_LABEL_NORMALIZE = _load_action_map()
+if not COMMON_ACTION_MAP:
+    COMMON_ACTION_MAP = {
+        "stand": 7,
+        "sit": 0,
+        "hand_raise": 6,
+        "reading": 8,
+        "writing": 5,
+        "phone": 2,
+        "sleep": 3,
+        "interact": 4,
+        "bow_head": 1,
+        "listen": 0,
+    }
+if not COMMON_LABEL_NORMALIZE:
+    COMMON_LABEL_NORMALIZE = {
+        "dx": "writing",
+        "dk": "reading",
+        "tt": "listen",
+        "zt": "bow_head",
+        "js": "hand_raise",
+        "zl": "stand",
+        "xt": "interact",
+        "jz": "interact",
+        "doze": "sleep",
+        "distract": "bow_head",
+    }
 
 
 # ================================
