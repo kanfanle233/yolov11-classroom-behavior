@@ -213,13 +213,8 @@ def main():
     parser = argparse.ArgumentParser(description="DashScope ASR 实时识别脚本（输出统一 transcript.jsonl schema）")
     parser.add_argument("--video", type=str, required=True, help="视频路径 (用于提取音频)")
     parser.add_argument("--out_dir", type=str, required=True, help="输出目录")
-
-    # 可选：指定模型（你以后换模型不用改代码）
     parser.add_argument("--asr_model", type=str, default="paraformer-realtime-v1", help="DashScope ASR model name")
-
-    # 可选：强制重新提取音频 / 重新识别
     parser.add_argument("--force", action="store_true", help="force re-extract wav and re-run asr")
-
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -245,6 +240,8 @@ def main():
     dashscope.api_key = api_key
 
     out_dir.mkdir(parents=True, exist_ok=True)
+
+
 
     video_path = Path(args.video)
     if not video_path.is_absolute():
