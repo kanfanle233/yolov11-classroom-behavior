@@ -222,18 +222,6 @@ def main():
 
     args = parser.parse_args()
 
-    api_key = resolve_api_key()
-    if not api_key:
-        out_dir = Path(args.out_dir)
-        if not out_dir.is_absolute():
-            out_dir = (base_dir / out_dir).resolve()
-        transcript_path = ensure_transcript_file(out_dir)
-        print("[WARN] 未配置 DashScope API Key，已生成空 transcript.jsonl 并跳过 ASR。")
-        print(f"[PATH] {transcript_path}")
-        return
-
-    dashscope.api_key = api_key
-
     out_dir = Path(args.out_dir)
     if not out_dir.is_absolute():
         out_dir = (base_dir / out_dir).resolve()
