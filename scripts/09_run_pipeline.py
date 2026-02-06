@@ -68,6 +68,16 @@ def resolve_model_or_fail(model_arg: str) -> str:
     return str(p)
 
 
+def resolve_video_path(video_arg: str) -> Path:
+    candidate = Path(video_arg)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    cwd_candidate = (Path.cwd() / candidate).resolve()
+    if cwd_candidate.exists():
+        return cwd_candidate
+    return (PROJECT_ROOT / candidate).resolve()
+
+
 def main():
     base_dir = PROJECT_ROOT
     scripts_dir = Path(__file__).resolve().parent
@@ -75,6 +85,7 @@ def main():
     parser = argparse.ArgumentParser(description="Deep Learning Classroom Behavior Pipeline")
     parser.add_argument("--video", type=str, default="data/videos/demo3.mp4")
     parser.add_argument("--name", type=str, default="")
+    parser.add_argument("--out_dir", type=str, default="")
     parser.add_argument("--py", type=str, default=sys.executable)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--from_step", type=int, default=1)
@@ -94,12 +105,15 @@ def main():
 
     args = parser.parse_args()
 
-    video_path = (base_dir / args.video).resolve()
+    video_path = resolve_video_path(args.video)
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
     name = args.name if args.name else video_path.stem
-    out_dir = (base_dir / "output" / name).resolve()
+    if args.out_dir:
+        out_dir = resolve_video_path(args.out_dir)
+    else:
+        out_dir = (base_dir / "output" / name).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # === Output Paths ===
