@@ -205,8 +205,19 @@ def main():
     parser.add_argument("--out", type=str, required=True, help="actions.jsonl")
     parser.add_argument("--model_weight", type=str, default="", help="path to custom .pth")
     parser.add_argument("--emb_out", type=str, default="", help="output path for embeddings.pkl")
+    parser.add_argument("--device", type=str, default="", help="device: 0/cuda/cpu; empty=auto")
+    parser.add_argument("--stride", type=int, default=INFERENCE_STRIDE, help="frames between inferences")
+    parser.add_argument("--clip_duration", type=int, default=CLIP_DURATION, help="frames per clip")
+    parser.add_argument("--sampling_rate", type=int, default=SAMPLING_RATE, help="temporal sampling rate")
+    parser.add_argument("--crop_size", type=int, default=CROP_SIZE, help="crop size for model input")
 
     args = parser.parse_args()
+
+    global CLIP_DURATION, SAMPLING_RATE, INFERENCE_STRIDE, CROP_SIZE
+    CLIP_DURATION = int(args.clip_duration)
+    SAMPLING_RATE = int(args.sampling_rate)
+    INFERENCE_STRIDE = int(args.stride)
+    CROP_SIZE = int(args.crop_size)
 
     video_path = Path(args.video)
     if not video_path.is_absolute(): video_path = base_dir / video_path
@@ -219,8 +230,15 @@ def main():
 
     emb_out_path = Path(args.emb_out) if args.emb_out else out_path.parent / "embeddings.pkl"
 
+    if not video_path.exists():
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    if not pose_path.exists():
+        raise FileNotFoundError(f"Pose tracks not found: {pose_path}")
+
+    device = args.device if args.device else get_device()
+
     # 1. 加载模型
-    recognizer = ActionRecognizer(model_path=args.model_weight, device=get_device())
+    recognizer = ActionRecognizer(model_path=args.model_weight, device=device)
 
     # 2. 加载 Track 数据
     print(f"[Data] Loading tracks from {pose_path}...")
@@ -231,6 +249,8 @@ def main():
 
     # 3. 准备视频读取
     cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
