@@ -597,7 +597,7 @@ fourcc = cv2.VideoWriter_fourcc(*'avc1')
                         const m = await res.json();
                         mediaDebug.value = m.debug || null;
 
-                        // 2) 用 filesList 补齐 pose / behavior overlay
+                        // 2) 用后端输出/前端兜底补齐 pose / behavior overlay
                         let poseFile = null;
                         let behaviorFile = null;
                         if (Array.isArray(filesList.value)) {
@@ -605,8 +605,8 @@ fourcc = cv2.VideoWriter_fourcc(*'avc1')
                             behaviorFile = filesList.value.find(x => x?.name && x.name.endsWith('_behavior_overlay.mp4'))?.name || null;
                         }
 
-                        const finalUrl = m.final_url || (behaviorFile ? buildOutputUrl(relativePath, behaviorFile) : null);
-                        const poseUrl = poseFile ? buildOutputUrl(relativePath, poseFile) : null;
+                        const finalUrl = m.final_url || m.behavior_url || (behaviorFile ? buildOutputUrl(relativePath, behaviorFile) : null);
+                        const poseUrl = m.pose_url || (poseFile ? buildOutputUrl(relativePath, poseFile) : null);
                         const originalUrl = m.original_url || null;
 
                         currentMediaUrls.value = { final: finalUrl, pose: poseUrl, original: originalUrl };
@@ -677,7 +677,9 @@ fourcc = cv2.VideoWriter_fourcc(*'avc1')
                      try {
                          const cid = currentCase.value.id;
                          const view = currentCase.value.view;
-                         const res = await fetch(`${apiCall('/api/projection', cid, view)}&method=${projectionMethod.value}`);
+                         const url = new URL(apiCall('/api/projection', cid, view), window.location.href);
+                         url.searchParams.set('method', projectionMethod.value);
+                         const res = await fetch(url.toString());
                          if (res.ok) { projectionData.value = (await res.json()).points || []; renderProjection(); }
                      } catch(e){}
                 };

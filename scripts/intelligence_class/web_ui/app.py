@@ -13,9 +13,6 @@ from collections import defaultdict
 from enum import Enum
 
 import numpy as np
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.decomposition import PCA
-from sklearn.manifold import MDS, TSNE
 
 # ---------------- MODIFIED IMPORTS ----------------
 # Added Query
@@ -239,6 +236,19 @@ def _ffprobe_duration_fps(path: Path) -> dict:
         return {"frames": frames, "fps": fps}
     except Exception:
         return {"frames": 0, "fps": 0.0}
+
+
+def _pick_overlay_files(mp4s: List[Path]) -> Tuple[Optional[Path], Optional[Path]]:
+    pose_file = None
+    behavior_file = None
+    for p in mp4s:
+        name = p.name.lower()
+        if name.endswith("_behavior_overlay.mp4"):
+            behavior_file = p
+            continue
+        if name.endswith("_overlay.mp4") and "behavior_overlay" not in name:
+            pose_file = p
+    return pose_file, behavior_file
 
 
 # ================================
@@ -534,10 +544,17 @@ class ProjectionMetric(str, Enum):
 
 
 # ---------------- NEW HELPERS for Sklearn Compatibility ----------------
-def _make_mds_precomputed(n_components=2, random_state=0):
+def _get_sklearn_components():
+    from sklearn.preprocessing import StandardScaler, MinMaxScaler
+    from sklearn.decomposition import PCA
+    from sklearn.manifold import MDS, TSNE
+    return StandardScaler, MinMaxScaler, PCA, MDS, TSNE
+
+
+def _make_mds_precomputed(mds_cls, n_components=2, random_state=0):
     """Compatible wrapper for MDS with precomputed dissimilarity."""
     try:
-        return MDS(
+        return mds_cls(
             n_components=n_components,
             dissimilarity="precomputed",
             normalized_stress="auto",
@@ -545,18 +562,18 @@ def _make_mds_precomputed(n_components=2, random_state=0):
         )
     except TypeError:
         # Fallback for older sklearn without normalized_stress
-        return MDS(
+        return mds_cls(
             n_components=n_components,
             dissimilarity="precomputed",
             random_state=random_state,
         )
 
 
-def _fit_tsne_2d(X_std):
+def _fit_tsne_2d(tsne_cls, X_std):
     """Compatible wrapper for TSNE fit_transform."""
     perplexity = max(1, min(30, len(X_std) - 1))
     try:
-        tsne = TSNE(
+        tsne = tsne_cls(
             n_components=2,
             init="pca",
             learning_rate="auto",
@@ -565,7 +582,7 @@ def _fit_tsne_2d(X_std):
         )
     except TypeError:
         # Fallback for older sklearn without learning_rate="auto"
-        tsne = TSNE(
+        tsne = tsne_cls(
             n_components=2,
             init="pca",
             learning_rate=200.0,
@@ -886,7 +903,11 @@ def get_summary(case_id: str, view: Optional[str] = None):
 def api_media(case_id: str, view: Optional[str] = None):
     case_dir = get_case_dir(case_id, view=view)
     resp = {
-        "final_url": "", "original_url": "", "audio_url": "",
+        "final_url": "",
+        "pose_url": "",
+        "behavior_url": "",
+        "original_url": "",
+        "audio_url": "",
         "debug": {
             "case_id_req": case_id, "view_req": view, "final_codec": "unknown",
             "candidates_checked": [], "all_candidates": [],
@@ -897,6 +918,7 @@ def api_media(case_id: str, view: Optional[str] = None):
     view_name = case_dir.parent.name
     base_id = _find_base_id(case_dir)
     mp4s = [p for p in case_dir.glob("*.mp4") if p.is_file()]
+    pose_file, behavior_file = _pick_overlay_files(mp4s)
 
     def score(p: Path) -> int:
         n = p.name.lower()
@@ -931,6 +953,10 @@ def api_media(case_id: str, view: Optional[str] = None):
         resp["final_url"] = _url_segments("/output", [view_name, case_dir.name, final_file])
         resp["debug"]["final_pick"] = final_file
         resp["debug"]["final_codec"] = final_codec
+    if pose_file:
+        resp["pose_url"] = _url_segments("/output", [view_name, case_dir.name, pose_file.name])
+    if behavior_file:
+        resp["behavior_url"] = _url_segments("/output", [view_name, case_dir.name, behavior_file.name])
     want_num = _extract_num(case_dir.name) or _extract_num(case_id)
     original_file = ""
     if want_num is not None:
@@ -1182,6 +1208,7 @@ def get_projection(
     # -------------------------------------------------------------
 
     try:
+        StandardScaler, MinMaxScaler, PCA, MDS, TSNE = _get_sklearn_components()
         # Use wrapper with signature
         X, ids, tracks_stats = compute_action_features(case_dir)
         if not _is_features_good(X, ids, min_points=3):
@@ -1193,7 +1220,7 @@ def get_projection(
         if metric == ProjectionMetric.LEVENSHTEIN:
             dist_matrix = compute_levenshtein_matrix(tracks_stats, ids)
             # Safe call using helper
-            mds = _make_mds_precomputed(n_components=2, random_state=0)
+            mds = _make_mds_precomputed(MDS, n_components=2, random_state=0)
             points_2d = mds.fit_transform(dist_matrix)
 
         else:
@@ -1208,7 +1235,7 @@ def get_projection(
                 )
             elif method == ProjectionMethod.TSNE:
                 # Safe call using helper
-                points_2d = _fit_tsne_2d(X_std)
+                points_2d = _fit_tsne_2d(TSNE, X_std)
             else:  # MDS
                 points_2d = MDS(n_components=2).fit_transform(X_std)
         # -----------------------------------------------------------
