@@ -238,6 +238,19 @@ def _ffprobe_duration_fps(path: Path) -> dict:
         return {"frames": 0, "fps": 0.0}
 
 
+def _pick_overlay_files(mp4s: List[Path]) -> Tuple[Optional[Path], Optional[Path]]:
+    pose_file = None
+    behavior_file = None
+    for p in mp4s:
+        name = p.name.lower()
+        if name.endswith("_behavior_overlay.mp4"):
+            behavior_file = p
+            continue
+        if name.endswith("_overlay.mp4") and "behavior_overlay" not in name:
+            pose_file = p
+    return pose_file, behavior_file
+
+
 # ================================
 # 2) Timeline 读取/兜底生成
 # ================================
@@ -890,7 +903,11 @@ def get_summary(case_id: str, view: Optional[str] = None):
 def api_media(case_id: str, view: Optional[str] = None):
     case_dir = get_case_dir(case_id, view=view)
     resp = {
-        "final_url": "", "original_url": "", "audio_url": "",
+        "final_url": "",
+        "pose_url": "",
+        "behavior_url": "",
+        "original_url": "",
+        "audio_url": "",
         "debug": {
             "case_id_req": case_id, "view_req": view, "final_codec": "unknown",
             "candidates_checked": [], "all_candidates": [],
@@ -901,6 +918,7 @@ def api_media(case_id: str, view: Optional[str] = None):
     view_name = case_dir.parent.name
     base_id = _find_base_id(case_dir)
     mp4s = [p for p in case_dir.glob("*.mp4") if p.is_file()]
+    pose_file, behavior_file = _pick_overlay_files(mp4s)
 
     def score(p: Path) -> int:
         n = p.name.lower()
@@ -935,6 +953,10 @@ def api_media(case_id: str, view: Optional[str] = None):
         resp["final_url"] = _url_segments("/output", [view_name, case_dir.name, final_file])
         resp["debug"]["final_pick"] = final_file
         resp["debug"]["final_codec"] = final_codec
+    if pose_file:
+        resp["pose_url"] = _url_segments("/output", [view_name, case_dir.name, pose_file.name])
+    if behavior_file:
+        resp["behavior_url"] = _url_segments("/output", [view_name, case_dir.name, behavior_file.name])
     want_num = _extract_num(case_dir.name) or _extract_num(case_id)
     original_file = ""
     if want_num is not None:
