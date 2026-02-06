@@ -545,7 +545,8 @@ fourcc = cv2.VideoWriter_fourcc(*'avc1')
 
                 // Helper to construct API calls with view parameter
                 const apiCall = (endpoint, id, view) => {
-                    const url = new URL(`${API_BASE}${endpoint}/${encodeURIComponent(id)}`);
+                    const path = `${API_BASE}${endpoint}/${encodeURIComponent(id)}`;
+                    const url = new URL(path, window.location.href);
                     if (view) url.searchParams.append('view', view);
                     return url.toString();
                 };
