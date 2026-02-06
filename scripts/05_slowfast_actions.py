@@ -199,6 +199,8 @@ def load_tracks_by_frame(path):
 def main():
     base_dir = Path(__file__).resolve().parents[1]
 
+    global CLIP_DURATION, SAMPLING_RATE, INFERENCE_STRIDE, CROP_SIZE
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--video", type=str, required=True)
     parser.add_argument("--pose", type=str, required=True, help="pose_tracks_smooth.jsonl")
@@ -213,7 +215,6 @@ def main():
 
     args = parser.parse_args()
 
-    global CLIP_DURATION, SAMPLING_RATE, INFERENCE_STRIDE, CROP_SIZE
     CLIP_DURATION = int(args.clip_duration)
     SAMPLING_RATE = int(args.sampling_rate)
     INFERENCE_STRIDE = int(args.stride)
