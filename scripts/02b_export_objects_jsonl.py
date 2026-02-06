@@ -88,7 +88,11 @@ def main():
     print(f"[INFO] classes = {keep_classes} -> {[names[c] for c in keep_classes] if keep_classes else 'ALL'}")
 
     cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    if fps <= 1e-6:
+        fps = 25.0
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 

@@ -1,6 +1,7 @@
 import os
 import cv2
 import argparse
+import torch
 from ultralytics import YOLO
 from pathlib import Path
 
@@ -15,6 +16,9 @@ def main():
     parser.add_argument("--out", type=str, default="output/pose_demo_out.mp4", help="relative path to project root")
     # ✅ 修复：默认模型放在项目根目录，而不是 runs/
     parser.add_argument("--model", type=str, default="yolo11n-pose.pt", help="relative path to project root")
+    parser.add_argument("--imgsz", type=int, default=960, help="inference image size")
+    parser.add_argument("--device", type=str, default="", help="device: 0/cuda/cpu; empty=auto")
+    parser.add_argument("--half", type=int, default=0, help="1=fp16 (cuda only), 0=fp32")
 
     args = parser.parse_args()
 
@@ -64,6 +68,9 @@ def main():
     print(f"[INFO] Model : {model_path}")
     print(f"[INFO] FPS={fps:.2f}, Size={w}x{h}")
 
+    device = args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu")
+    use_half = bool(int(args.half)) and device != "cpu"
+
     # ====== 6) 逐帧推理 ======
     frame_idx = 0
     while True:
@@ -74,9 +81,9 @@ def main():
         results = model.predict(
             frame,
             verbose=False,
-            device=0,  # 强制用第一块GPU
-            half=True,  # FP16，4060 非常吃香（显存/速度直接改善）
-            imgsz=960,  # 1080p 建议 960 或 832；想更快用 640
+            device=device,
+            half=use_half,
+            imgsz=args.imgsz,
             conf=0.25
         )
 

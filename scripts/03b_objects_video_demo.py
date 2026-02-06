@@ -83,6 +83,8 @@ def main():
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     writer = cv2.VideoWriter(str(out_noaudio), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    if not writer.isOpened():
+        raise RuntimeError(f"VideoWriter open failed: {out_noaudio}")
 
     # 用指针推进 objects（避免建超大 dict）
     ptr = 0
@@ -97,12 +99,12 @@ def main():
         cur_objs = []
         while ptr < len(objects) and objects[ptr].get("frame", -1) < frame_idx:
             ptr += 1
-        if ptr < len(objects) and objects[ptr].get("frame", -1) == frame_idx:
-            # 如果你的 jsonl 一帧只写一行，这里就是那一行
+        while ptr < len(objects) and objects[ptr].get("frame", -1) == frame_idx:
             rec = objects[ptr]
             for obj in rec.get("objects", []):
                 if float(obj.get("conf", 0.0)) >= args.conf:
                     cur_objs.append(obj)
+            ptr += 1
 
         # HUD：让你知道脚本确实在跑（避免“像原视频”的错觉）
         t = frame_idx / fps

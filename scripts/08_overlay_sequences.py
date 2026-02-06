@@ -256,19 +256,32 @@ def main():
 
     args = parser.parse_args()
 
+    video_path = Path(args.video)
+    if not video_path.is_absolute():
+        video_path = (base_dir / video_path).resolve()
+    actions_path = Path(args.actions)
+    if not actions_path.is_absolute():
+        actions_path = (base_dir / actions_path).resolve()
+    transcript_path = Path(args.transcript)
+    if not transcript_path.is_absolute():
+        transcript_path = (base_dir / transcript_path).resolve()
     out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = (base_dir / out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.out_video:
         out_path = Path(args.out_video)
+        if not out_path.is_absolute():
+            out_path = (base_dir / out_path).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
     else:
         out_path = out_dir / f"{args.name}_overlay.mp4"
 
     out_path_noaudio = out_dir / f"{args.name}_overlay_noaudio.mp4"
 
-    transcript_raw = load_jsonl(Path(args.transcript))
-    actions_raw = load_jsonl(Path(args.actions))
+    transcript_raw = load_jsonl(transcript_path)
+    actions_raw = load_jsonl(actions_path)
 
     transcript = normalize_transcript(transcript_raw)
     actions_norm = normalize_actions(actions_raw)
@@ -279,11 +292,13 @@ def main():
     print(f"[INFO] actions with_t   : {len(with_t)}")
     print(f"[INFO] actions with_seg : {len(with_seg)}")
 
-    cap = cv2.VideoCapture(args.video)
+    cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {args.video}")
+        raise RuntimeError(f"Cannot open video: {video_path}")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    if fps <= 1e-6:
+        fps = 25.0
     w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     # 注意：OpenCV 写入的这个中间文件依然是 mp4v 格式，体积很大
@@ -350,7 +365,7 @@ def main():
                 [
                     "ffmpeg", "-y",
                     "-i", str(out_path_noaudio),  # 视频流 (OpenCV生成)
-                    "-i", args.video,  # 音频流 (原视频)
+                    "-i", str(video_path),  # 音频流 (原视频)
                     # === 关键修改 ===
                     "-c:v", "libx264",  # 强制使用 H.264 编码
                     "-crf", "23",  # 压缩质量 (越小越清晰, 23是平衡点)
