@@ -2,6 +2,7 @@
 import json
 import argparse
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
 import matplotlib.pyplot as plt
@@ -249,10 +250,18 @@ def draw_timeline(
             per_person_segments[pid] = merged_segs
             per_person_total[pid] = total
 
-    if not per_person_segments:
-        print("[Warning] No valid visual segments found.")
-        # Create a dummy entry so we can at least draw group events if any
-        # return
+    if not per_person_segments and not group_events:
+        print("[Warning] No valid visual segments found and no group events. Writing empty outputs.")
+        _ensure_dir(out_path)
+        plt.figure(figsize=(6, 2))
+        plt.text(0.5, 0.5, "No data", ha="center", va="center")
+        plt.axis("off")
+        plt.savefig(out_path, dpi=240)
+        plt.close()
+        json_out_path = os.path.splitext(out_path)[0] + ".json"
+        with open(json_out_path, "w", encoding="utf-8") as f:
+            json.dump({"items": []}, f, ensure_ascii=False, indent=2)
+        return
 
     ranked = sorted(per_person_total.items(), key=lambda kv: (-kv[1], _safe_int(kv[0])))
     ranked = ranked[: (max_people if max_people is not None else top_n)]
@@ -397,6 +406,7 @@ def draw_timeline(
 # ===================== CLI =====================
 
 def main():
+    base_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", required=True, help="per_person_sequences.json path")
     parser.add_argument("--out", required=True, help="output png path")
@@ -413,16 +423,26 @@ def main():
 
     args = parser.parse_args()
 
-    with open(args.src, "r", encoding="utf-8") as f:
+    src_path = Path(args.src)
+    if not src_path.is_absolute():
+        src_path = (base_dir / src_path).resolve()
+    out_path = Path(args.out)
+    if not out_path.is_absolute():
+        out_path = (base_dir / out_path).resolve()
+    group_src = Path(args.group_src) if args.group_src else None
+    if group_src and not group_src.is_absolute():
+        group_src = (base_dir / group_src).resolve()
+
+    with open(src_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     group_events = []
-    if args.group_src:
-        group_events = load_group_events(args.group_src)
+    if group_src:
+        group_events = load_group_events(str(group_src))
 
     draw_timeline(
         data=data,
-        out_path=args.out,
+        out_path=str(out_path),
         group_events=group_events,  # Pass loaded group events
         fps=args.fps,
         top_n=args.top_n,

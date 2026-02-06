@@ -10,6 +10,7 @@
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -158,35 +159,31 @@ def _pick_best_pose_model(project_root: Path) -> Optional[Path]:
 
 def _convert_to_h264(src: Path, dst: Path):
     """
-    用 ffmpeg 转码到 H.264（yuv420p + faststart），更适配浏览器播放。
-    失败则保留原始文件（尽量不让 pipeline 断）。
+    用 ffmpeg 转码到 H.264（yuv420p），更适配浏览器播放。
+    失败则保留 mp4v 文件，并尝试拷贝一份到目标路径。
     """
     cmd = [
         "ffmpeg", "-y",
         "-i", str(src),
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-        "-preset", "fast",
-        "-an",
+        "-crf", "23",
+        "-preset", "veryfast",
         str(dst),
     ]
 
     print(f"[转码] 正在转换为 H.264: {dst.name} ...")
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if src.exists():
-            src.unlink()
         print(f"[转码] 成功: {dst.name}")
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         is_missing = isinstance(e, FileNotFoundError)
         reason = "FFmpeg 未安装" if is_missing else f"报错 (Exit: {getattr(e, 'returncode', '?')})"
-        print(f"[警告] H.264 转码失败 ({reason})。保留原始文件。")
-        # 尽量保留一个可用文件
+        print(f"[警告] H.264 转码失败 ({reason})。保留 mp4v 文件。")
         if dst.exists():
             dst.unlink()
         if src.exists():
-            src.rename(dst)
+            shutil.copy2(src, dst)
 
 
 # =====================================================================================
@@ -370,7 +367,8 @@ def _overlay_from_case_det(
     if dry_run:
         return
 
-    print(f"[绘制] 正在生成行为叠加视频 (临时): {out_mp4.name}")
+    mp4v_path = out_mp4.with_name(f"{out_mp4.stem}_mp4v.mp4")
+    print(f"[绘制] 正在生成行为叠加视频 (mp4v): {mp4v_path.name}")
 
     fps_use, _, w, h = get_video_info(video_path, fps_fallback)
 
@@ -379,11 +377,10 @@ def _overlay_from_case_det(
         fi = int(rec.get("frame_idx", 0))
         det_map[fi] = rec.get("dets", []) or []
 
-    temp_mp4 = out_mp4.with_suffix(".temp.mp4")
     cap = cv2.VideoCapture(str(video_path))
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
-    vw = cv2.VideoWriter(str(temp_mp4), fourcc, fps_use, (w, h))
+    vw = cv2.VideoWriter(str(mp4v_path), fourcc, fps_use, (w, h))
 
     fi = 0
     try:
@@ -411,7 +408,7 @@ def _overlay_from_case_det(
         cap.release()
         vw.release()
 
-    _convert_to_h264(temp_mp4, out_mp4)
+    _convert_to_h264(mp4v_path, out_mp4)
 
 
 def export_bundles(

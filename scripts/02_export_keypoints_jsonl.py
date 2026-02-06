@@ -1,4 +1,3 @@
-import os
 import json
 import cv2
 import argparse
@@ -14,6 +13,9 @@ def main():
     parser.add_argument("--out", type=str, default="output/pose_keypoints_v2.jsonl", help="output jsonl path (relative to project root)")
     parser.add_argument("--model", type=str, default="yolo11s-pose.pt", help="model path (relative to project root)")
     parser.add_argument("--conf", type=float, default=0.45, help="person conf threshold")
+    parser.add_argument("--imgsz", type=int, default=960, help="inference image size")
+    parser.add_argument("--device", type=str, default="", help="device: 0/cuda/cpu; empty=auto")
+    parser.add_argument("--half", type=int, default=0, help="1=fp16 (cuda only), 0=fp32")
     args = parser.parse_args()
 
     video_path = (base_dir / args.video).resolve()
@@ -40,6 +42,8 @@ def main():
     frame_idx = 0
 
     conf_thres = float(args.conf)
+    device = args.device if args.device else None
+    use_half = bool(int(args.half))
 
     with open(str(jsonl_path), "w", encoding="utf-8") as f:
         while True:
@@ -48,7 +52,14 @@ def main():
                 break
 
             t = frame_idx / fps
-            r = model.predict(frame, verbose=False, conf=conf_thres)[0]
+            r = model.predict(
+                frame,
+                verbose=False,
+                conf=conf_thres,
+                imgsz=args.imgsz,
+                device=device,
+                half=use_half,
+            )[0]
 
             persons = []
             if r.boxes is not None and r.keypoints is not None:

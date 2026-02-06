@@ -50,7 +50,7 @@ def ema_update(prev, cur, alpha=0.75):
 
 
 def main():
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_dir = Path(__file__).resolve().parents[1]
 
     # ===== 命令行参数 =====
     parser = argparse.ArgumentParser()
@@ -59,9 +59,15 @@ def main():
     parser.add_argument("--video", dest="video_path", type=str, default=os.path.join("data", "videos", "demo1.mp4"))
     args = parser.parse_args()
 
-    in_path = os.path.join(base_dir, args.in_path)
-    out_path = os.path.join(base_dir, args.out_path)
-    video_path = os.path.join(base_dir, args.video_path)
+    in_path = Path(args.in_path)
+    if not in_path.is_absolute():
+        in_path = (base_dir / in_path).resolve()
+    out_path = Path(args.out_path)
+    if not out_path.is_absolute():
+        out_path = (base_dir / out_path).resolve()
+    video_path = Path(args.video_path)
+    if not video_path.is_absolute():
+        video_path = (base_dir / video_path).resolve()
 
     # ===== 用视频拿分辨率 =====
     cap = cv2.VideoCapture(video_path)
@@ -102,14 +108,14 @@ def main():
     tracks = {}  # tid -> state
     track_lengths = defaultdict(int)
 
-    if not os.path.exists(in_path):
+    if not in_path.exists():
         raise FileNotFoundError(f"Input jsonl not found: {in_path}")
 
     # 确保输出目录存在
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ====== [新增] 临时文件：第一遍写盘，避免 temp_records 内存爆炸 ======
-    tmp_path = out_path + ".tmp.jsonl"
+    tmp_path = str(out_path) + ".tmp.jsonl"
 
     print(f"[INFO] Tracking started using strict logic...")
     print(f"       max_lost_frames={max_lost_frames} (Memory ~20s)")
