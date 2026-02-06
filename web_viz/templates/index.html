@@ -497,7 +497,9 @@
             for(let u of urls[k]) {
                 try {
                     let r = await fetch(base + u, {method:'HEAD'});
-                    if(r.ok && (r.headers.get("content-type")||"").includes("video")) { res[k] = base+u; break; }
+                    const contentType = (r.headers.get("content-type") || "").toLowerCase();
+                    const isVideo = contentType.includes("video") || contentType.includes("octet-stream");
+                    if(r.ok && (isVideo || !contentType)) { res[k] = base + u; break; }
                 } catch(e){}
             }
         }
