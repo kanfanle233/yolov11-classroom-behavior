@@ -381,7 +381,7 @@ def _overlay_from_case_det(
 
     temp_mp4 = out_mp4.with_suffix(".temp.mp4")
     cap = cv2.VideoCapture(str(video_path))
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     vw = cv2.VideoWriter(str(temp_mp4), fourcc, fps_use, (w, h))
 
