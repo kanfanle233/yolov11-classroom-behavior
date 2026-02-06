@@ -82,7 +82,10 @@ def main():
     parser.add_argument("--out", required=True, help="student_features.json")
     args = parser.parse_args()
 
+    base_dir = Path(__file__).resolve().parents[1]
     src_path = Path(args.src)
+    if not src_path.is_absolute():
+        src_path = (base_dir / src_path).resolve()
     if not src_path.exists():
         print("Source file not found.")
         return
@@ -106,10 +109,15 @@ def main():
             features_list.append(feat)
 
     # 输出
-    with open(args.out, "w", encoding="utf-8") as f:
+    out_path = Path(args.out)
+    if not out_path.is_absolute():
+        out_path = (base_dir / out_path).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(features_list, f, indent=2)
 
-    print(f"[Done] Exported features for {len(features_list)} students to {args.out}")
+    print(f"[Done] Exported features for {len(features_list)} students to {out_path}")
 
 
 if __name__ == "__main__":

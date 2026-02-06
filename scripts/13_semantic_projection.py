@@ -10,7 +10,7 @@ try:
     import umap
 except ImportError:
     print("Error: 'umap-learn' is not installed. Please run: pip install umap-learn")
-    exit(1)
+    umap = None
 
 
 def main():
@@ -25,7 +25,10 @@ def main():
 
     args = parser.parse_args()
 
+    base_dir = Path(__file__).resolve().parents[1]
     emb_path = Path(args.emb)
+    if not emb_path.is_absolute():
+        emb_path = (base_dir / emb_path).resolve()
     if not emb_path.exists():
         print(f"Embedding file not found: {emb_path}")
         return
@@ -70,11 +73,19 @@ def main():
         X = np.mean(X, axis=reduce_axes)
         print(f"      Fixed shape: {X.shape}")
 
-    if len(X) < 3:
-        print("Not enough data for UMAP (need > 3 samples). Writing empty result.")
-        with open(args.out, "w", encoding="utf-8") as f:
+    out_path = Path(args.out)
+    if not out_path.is_absolute():
+        out_path = (base_dir / out_path).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if len(X) < 3 or umap is None:
+        print("Not enough data for UMAP or umap-learn missing. Writing empty result.")
+        with open(out_path, "w", encoding="utf-8") as f:
             json.dump([], f)
         return
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
     # === UMAP 降维 ===
     print(f"[2/4] Running UMAP (metric={args.metric})...")
@@ -85,25 +96,28 @@ def main():
         n_components=2,
         random_state=42
     )
-    embedding_2d = reducer.fit_transform(X)
+    embedding_2d = reducer.fit_transform(X_scaled)
 
     # === 聚类 ===
     print(f"[3/4] Running Clustering (KMeans, k={args.n_clusters})...")
     kmeans = KMeans(n_clusters=args.n_clusters, random_state=42)
-    labels = kmeans.fit_predict(X)
+    labels = kmeans.fit_predict(X_scaled)
 
     # === 输出 ===
     print(f"[4/4] Exporting to {args.out}...")
     meta_map = {}
-    if Path(args.meta).exists():
-        with open(args.meta, "r", encoding="utf-8") as f:
+    meta_path = Path(args.meta)
+    if not meta_path.is_absolute():
+        meta_path = (base_dir / meta_path).resolve()
+    if meta_path.exists():
+        with open(meta_path, "r", encoding="utf-8") as f:
             meta_data = json.load(f)
             for m in meta_data:
-                meta_map[m['track_id']] = m
+                meta_map[str(m.get("track_id"))] = m
 
     output_data = []
     for i, tid in enumerate(track_ids):
-        info = meta_map.get(tid, {})
+        info = meta_map.get(str(tid), {})
         output_data.append({
             "track_id": tid,
             "x": float(embedding_2d[i, 0]),
@@ -113,7 +127,7 @@ def main():
             "activity": info.get("Activity Lvl", 0)
         })
 
-    with open(args.out, "w", encoding="utf-8") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(output_data, f, indent=2)
 
     print(f"[Done] Semantic projection saved. Clusters: {len(set(labels))}")

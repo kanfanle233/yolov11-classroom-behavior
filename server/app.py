@@ -3,6 +3,7 @@ import sys
 import json
 from pathlib import Path
 from functools import lru_cache
+import inspect
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -120,6 +121,34 @@ def simple_levenshtein(seq1: str, seq2: str) -> float:
                     matrix[x, y - 1] + 1
                 )
     return float(matrix[size_x - 1, size_y - 1])
+
+
+def _supports_param(cls, param: str) -> bool:
+    try:
+        return param in inspect.signature(cls.__init__).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _make_mds(dissimilarity: str, random_state: int = 42):
+    kwargs = {"n_components": 2, "dissimilarity": dissimilarity, "random_state": random_state}
+    if _supports_param(MDS, "n_jobs"):
+        kwargs["n_jobs"] = -1
+    return MDS(**kwargs)
+
+
+def _fit_tsne(data: np.ndarray, metric: str, random_state: int = 42) -> np.ndarray:
+    n_samples = data.shape[0]
+    perp = min(30, max(5, n_samples - 1))
+    kwargs = {
+        "n_components": 2,
+        "perplexity": perp,
+        "metric": metric,
+        "random_state": random_state,
+    }
+    if _supports_param(TSNE, "n_jobs"):
+        kwargs["n_jobs"] = -1
+    return TSNE(**kwargs).fit_transform(data)
 
 
 # =========================================================
@@ -270,16 +299,9 @@ def compute_projection_cached(video_id: str, method: str, metric: str) -> Dict[s
         if method == "pca":
             coords = PCA(n_components=2).fit_transform(X)
         elif method == "mds":
-            coords = MDS(n_components=2, dissimilarity="euclidean", random_state=42, n_jobs=-1).fit_transform(X)
+            coords = _make_mds("euclidean", random_state=42).fit_transform(X)
         elif method == "tsne":
-            perp = min(30, max(5, n_samples - 1))
-            coords = TSNE(
-                n_components=2,
-                perplexity=perp,
-                metric="euclidean",
-                random_state=42,
-                n_jobs=-1,
-            ).fit_transform(X)
+            coords = _fit_tsne(X, metric="euclidean", random_state=42)
         else:
             # 不认识就回退
             coords = PCA(n_components=2).fit_transform(X)
@@ -309,28 +331,11 @@ def compute_projection_cached(video_id: str, method: str, metric: str) -> Dict[s
             method = "mds"
 
         if method == "mds":
-            coords = MDS(
-                n_components=2,
-                dissimilarity="precomputed",
-                random_state=42,
-                n_jobs=-1
-            ).fit_transform(dist_matrix)
+            coords = _make_mds("precomputed", random_state=42).fit_transform(dist_matrix)
         elif method == "tsne":
-            perp = min(30, max(5, n_samples - 1))
-            coords = TSNE(
-                n_components=2,
-                perplexity=perp,
-                metric="precomputed",
-                random_state=42,
-                n_jobs=-1
-            ).fit_transform(dist_matrix)
+            coords = _fit_tsne(dist_matrix, metric="precomputed", random_state=42)
         else:
-            coords = MDS(
-                n_components=2,
-                dissimilarity="precomputed",
-                random_state=42,
-                n_jobs=-1
-            ).fit_transform(dist_matrix)
+            coords = _make_mds("precomputed", random_state=42).fit_transform(dist_matrix)
 
     else:
         # 未知 metric
